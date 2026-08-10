@@ -352,13 +352,14 @@ class GoogleSheetService {
     if (_api == null) return;
     const h = 'TEXT(TODAY(),"yyyy-mm-dd")';           // hari ini (teks)
     const b = 'TEXT(TODAY(),"yyyy-mm")&"*"';          // prefix bulan, mis "2026-07*"
-    final omzetH = 'SUMIFS(Transaksi!J:J,Transaksi!B:B,$h,Transaksi!K:K,"ACTIVE")';
-    final trxH = 'COUNTIFS(Transaksi!B:B,$h,Transaksi!K:K,"ACTIVE")';
+    const omzetH = 'SUMIFS(Transaksi!J:J,Transaksi!B:B,$h,Transaksi!K:K,"ACTIVE")';
+    const trxH = 'COUNTIFS(Transaksi!B:B,$h,Transaksi!K:K,"ACTIVE")';
     String metode(String m) => 'SUMIFS(Transaksi!J:J,Transaksi!B:B,$h,Transaksi!F:F,"$m",Transaksi!K:K,"ACTIVE")';
     String tipeVal(String tp) => 'SUMIFS(Transaksi!J:J,Transaksi!B:B,$h,Transaksi!E:E,"$tp",Transaksi!K:K,"ACTIVE")';
     String tipeCnt(String tp) => 'COUNTIFS(Transaksi!B:B,$h,Transaksi!E:E,"$tp",Transaksi!K:K,"ACTIVE")';
-    final omzetB = 'SUMIFS(Transaksi!J:J,Transaksi!B:B,$b,Transaksi!K:K,"ACTIVE")';
-    final trxB = 'COUNTIFS(Transaksi!B:B,$b,Transaksi!K:K,"ACTIVE")';
+    const omzetB = 'SUMIFS(Transaksi!J:J,Transaksi!B:B,$b,Transaksi!K:K,"ACTIVE")';
+    const trxB = 'COUNTIFS(Transaksi!B:B,$b,Transaksi!K:K,"ACTIVE")';
+
 
     // Susun baris + tandai jenis format tiap sel.
     final values = <List<Object?>>[];
@@ -436,8 +437,9 @@ class GoogleSheetService {
     sec('▌ TOP 5 MENU — HARI INI');
     // QUERY langsung return 5 baris (menu, total qty) utk trx yg kodenya diawali prefix hari ini.
     // Ditulis di 1 sel; Sheet akan tumpah ke bawah (array formula).
-    final kodePrefixHari = 'TRX-TEXT(TODAY(),"yyyyMMdd")';
+    const kodePrefixHari = 'TRX-TEXT(TODAY(),"yyyyMMdd")';
     kv('Lihat 5 terlaris di bawah ↓',
+
       'IFERROR(QUERY(Transaksi_Item!A2:F,"SELECT B, SUM(D) WHERE A STARTS WITH \'$kodePrefixHari\' GROUP BY B LABEL SUM(D) \'Qty\' ORDER BY SUM(D) DESC LIMIT 5",0),"belum ada data")',
       bfmt: 'int', note: 'menu + total qty terjual hari ini');
     gap();
@@ -952,7 +954,7 @@ class GoogleSheetService {
       final lastRowIdx = values.length; // 1-based, baris terakhir tgl
       for (int i = 0; i < emps.length; i++) {
         final col = _colLetter(1 + i);
-        totalRow.add('=COUNTA(${col}$headerRowIdx:${col}$lastRowIdx)');
+        totalRow.add('=COUNTA($col$headerRowIdx:$col$lastRowIdx)');
       }
       values.add(totalRow);
       totalRows.add(values.length); // 1-based index baris TOTAL
@@ -1004,7 +1006,7 @@ class GoogleSheetService {
   }
 
   /// Format tab Absensi_Matriks: header & total bold, freeze, lebar kolom tgl.
-  Future<void> _formatAbsensiMatriks(String id, int sid, int nRows, int nCols) async {
+  Future<void> _formatAbsensiMatriks(String id, int sid, int nRows, int nCols, List<int> totalRows) async {
     final reqs = <gs.Request>[];
     final lastCol = _colLetter(nCols - 1);
     // Header bold + background coklat.
@@ -1015,14 +1017,16 @@ class GoogleSheetService {
           textFormat: gs.TextFormat(bold: true, foregroundColor: _rgb(0xFFFFFF)))),
       fields: 'userEnteredFormat(backgroundColor,textFormat)',
     )));
-    // Baris terakhir (TOTAL) bold.
-    reqs.add(gs.Request(repeatCell: gs.RepeatCellRequest(
-      range: gs.GridRange(sheetId: sid, startRowIndex: nRows - 1, endRowIndex: nRows, startColumnIndex: 0, endColumnIndex: nCols),
-      cell: gs.CellData(userEnteredFormat: gs.CellFormat(
-          backgroundColor: _rgb(0xF5F3F0),
-          textFormat: gs.TextFormat(bold: true))),
-      fields: 'userEnteredFormat(backgroundColor,textFormat)',
-    )));
+    // Baris TOTAL bold.
+    for (final tr in totalRows) {
+      reqs.add(gs.Request(repeatCell: gs.RepeatCellRequest(
+        range: gs.GridRange(sheetId: sid, startRowIndex: tr - 1, endRowIndex: tr, startColumnIndex: 0, endColumnIndex: nCols),
+        cell: gs.CellData(userEnteredFormat: gs.CellFormat(
+            backgroundColor: _rgb(0xF5F3F0),
+            textFormat: gs.TextFormat(bold: true))),
+        fields: 'userEnteredFormat(backgroundColor,textFormat)',
+      )));
+    }
     // Freeze baris header + kolom tgl.
     reqs.add(gs.Request(updateSheetProperties: gs.UpdateSheetPropertiesRequest(
       properties: gs.SheetProperties(sheetId: sid, gridProperties: gs.GridProperties(frozenRowCount: 1, frozenColumnCount: 1)),
@@ -1039,6 +1043,7 @@ class GoogleSheetService {
     final _ = lastCol;
     await _api!.spreadsheets.batchUpdate(gs.BatchUpdateSpreadsheetRequest(requests: reqs), id);
   }
+
 
   /// Tambah 1 baris transaksi ke tab Transaksi (append).
   Future<void> appendTransaction(String id, Map<String, dynamic> t) async {
