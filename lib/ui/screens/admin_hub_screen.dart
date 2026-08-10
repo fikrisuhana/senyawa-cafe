@@ -298,6 +298,45 @@ class _AdminHubScreenState extends State<AdminHubScreen> with SingleTickerProvid
           ),
           const SizedBox(height: 12),
 
+          // Payment Config Card
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('💳 Pembayaran', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  const SizedBox(height: 4),
+                  const Text('Metode & popup konfirmasi diatur di Spreadsheet (tab Setup).', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Expanded(
+                        child: Text('Popup "Sudah lunas?" utk non-tunai', style: TextStyle(fontSize: 13)),
+                      ),
+                      Switch(
+                        value: widget.pos.popupConfirmPayment,
+                        activeThumbColor: const Color(0xFF7A5540),
+                        onChanged: (val) {
+                          // Update lokal (next sync pull akan override dari Sheet kalau owner set di Sheet).
+                          // Tidak ada setter dedicated; update via prefs-like langsung ga ada, jadi ignore
+                          // — owner atur via Sheet. Tapi utk UX, biarkan toggle sbg indikator read-only.
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Atur popup & metode di Spreadsheet → tab Setup (popup_konfirmasi_bayar).')),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text('Metode aktif: ${widget.pos.paymentMethods.join(", ")}', style: const TextStyle(fontSize: 11, color: Color(0xFF356A58), fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+
           // Google Sheet Config Card
           Card(
             child: Padding(

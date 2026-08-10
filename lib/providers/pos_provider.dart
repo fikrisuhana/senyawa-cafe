@@ -16,11 +16,13 @@ class PosProvider extends ChangeNotifier {
   String _searchQuery = '';
   String _selectedCategory = 'SEMUA';
   String _orderType = 'DINE_IN'; // DINE_IN | TAKEAWAY
-  String _paymentMethod = 'CASH'; // CASH | QRIS | TRANSFER
+  String _paymentMethod = 'Tunai'; // metode aktif (dinamis, default Tunai)
   VoucherModel? _selectedVoucher;
   int _cashReceived = 0;
   bool _isLoading = true;
   List<String> _shifts = ['Pagi', 'Sore']; // daftar shift (dari Sheet tab Setup)
+  List<String> _paymentMethods = ['Tunai', 'QRIS', 'Transfer']; // dari Setup
+  bool _popupConfirmPayment = true; // popup 'Sudah lunas?' utk non-tunai (dari Setup)
 
   Timer? _syncTimer;
   DateTime _lastSyncTime = DateTime.now();
@@ -53,6 +55,14 @@ class PosProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   bool get isSyncing => _isSyncing;
   List<String> get shifts => _shifts;
+  List<String> get paymentMethods => _paymentMethods;
+  bool get popupConfirmPayment => _popupConfirmPayment;
+
+  /// Deteksi apakah nama metode = Tunai (mengandung 'tunai' atau 'cash').
+  bool isCashMethod(String method) {
+    final low = method.toLowerCase();
+    return low.contains('tunai') || low.contains('cash');
+  }
 
   String get syncStatusText {
     if (!_googleConnected) return 'Lokal · Google belum tersambung';
@@ -152,11 +162,22 @@ class PosProvider extends ChangeNotifier {
           final newShifts = await svc.pullShifts(targetSheetId);
           if (newShifts.isNotEmpty && !_listEq(newShifts, _shifts)) {
             _shifts = newShifts;
-            notifyListeners();
           }
           await svc.pullAttendance(targetSheetId, validShifts: _shifts);
+          // Pull metode pembayaran & flag popup dari Setup.
+          final newMethods = await svc.pullPaymentMethods(targetSheetId);
+          if (newMethods.isNotEmpty && !_listEq(newMethods, _paymentMethods)) {
+            _paymentMethods = newMethods;
+            // Kalau metode aktif skrg bukan bagian daftar baru, reset ke Tunai/default.
+            if (!newMethods.contains(_paymentMethod)) {
+              _paymentMethod = newMethods.firstWhere((m) => isCashMethod(m), orElse: () => newMethods.first);
+            }
+          }
+          final newPopup = await svc.pullPopupConfirm(targetSheetId);
+          if (newPopup != _popupConfirmPayment) _popupConfirmPayment = newPopup;
+          notifyListeners();
         } catch (e) {
-          debugPrint('Pull karyawan/absen/shift dari Sheet gagal: $e');
+          debugPrint('Pull karyawan/absen/shift/metode dari Sheet gagal: $e');
         }
         await loadCatalog();
 
@@ -302,7 +323,7 @@ class PosProvider extends ChangeNotifier {
   }
 
   int get changeAmount {
-    if (_paymentMethod != 'CASH') return 0;
+    if (!isCashMethod(_paymentMethod)) return 0;
     final diff = _cashReceived - totalAmount;
     return diff < 0 ? 0 : diff;
   }
@@ -329,7 +350,7 @@ class PosProvider extends ChangeNotifier {
     }
 
     // TUNAI wajib cukup — tolak kalau uang diterima < total.
-    if (_paymentMethod == 'CASH' && _cashReceived < totalAmount) {
+    if (isCashMethod(_paymentMethod) && _cashReceived < totalAmount) {
       final kurang = totalAmount - _cashReceived;
       _checkoutError = 'Uang tunai kurang Rp$kurang dari total. Transaksi belum bisa diselesaikan.';
       notifyListeners();
@@ -360,7 +381,7 @@ class PosProvider extends ChangeNotifier {
       discountAmount: discountAmount,
       voucherName: _selectedVoucher?.name,
       totalAmount: totalAmount,
-      cashReceived: _paymentMethod == 'CASH' ? _cashReceived : totalAmount,
+      cashReceived: isCashMethod(_paymentMethod) ? _cashReceived : totalAmount,
       changeAmount: changeAmount,
       costTotal: costTotal,
       synced: false,

@@ -698,52 +698,32 @@ class _PosScreenState extends State<PosScreen> {
                   Text('Total Tagihan: ${currencyFormatter.format(pos.totalAmount)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF7A5540))),
                   const SizedBox(height: 16),
 
-                  // Pilihan Metode Bayar (Tunai, QRIS, Transfer)
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ChoiceChip(
-                          label: const Center(child: Text('💵 Tunai', style: TextStyle(fontWeight: FontWeight.bold))),
-                          selected: pos.paymentMethod == 'CASH',
-                          selectedColor: const Color(0xFFB7F1DC),
-                          onSelected: (_) {
-                            pos.setPaymentMethod('CASH');
+                  // Pilihan Metode Bayar (dinamis dari Setup Sheet).
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: pos.paymentMethods.map((method) {
+                      final bool isCash = pos.isCashMethod(method);
+                      final icon = isCash ? '💵' : (method.toLowerCase().contains('qris') ? '📲' : '🏦');
+                      return ChoiceChip(
+                        label: Text('$icon $method', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        selected: pos.paymentMethod == method,
+                        selectedColor: const Color(0xFFB7F1DC),
+                        onSelected: (_) {
+                          pos.setPaymentMethod(method);
+                          if (isCash) {
                             pos.setCashReceived(pos.totalAmount);
                             cashController.text = pos.totalAmount.toString();
-                            setSheetState(() {});
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: ChoiceChip(
-                          label: const Center(child: Text('📲 QRIS', style: TextStyle(fontWeight: FontWeight.bold))),
-                          selected: pos.paymentMethod == 'QRIS',
-                          selectedColor: const Color(0xFFB7F1DC),
-                          onSelected: (_) {
-                            pos.setPaymentMethod('QRIS');
-                            setSheetState(() {});
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: ChoiceChip(
-                          label: const Center(child: Text('🏦 Transfer', style: TextStyle(fontWeight: FontWeight.bold))),
-                          selected: pos.paymentMethod == 'TRANSFER',
-                          selectedColor: const Color(0xFFB7F1DC),
-                          onSelected: (_) {
-                            pos.setPaymentMethod('TRANSFER');
-                            setSheetState(() {});
-                          },
-                        ),
-                      ),
-                    ],
+                          }
+                          setSheetState(() {});
+                        },
+                      );
+                    }).toList(),
                   ),
                   const SizedBox(height: 16),
 
-                  // Opsi Nominal Uang Tunai / Quick Cash (Jika TUNAI)
-                  if (pos.paymentMethod == 'CASH') ...[
+                  // Opsi Nominal Uang Tunai / Quick Cash (Jika metode = Tunai)
+                  if (pos.isCashMethod(pos.paymentMethod)) ...[
                     const Text('Nominal Uang Diterima (Quick Cash):', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
                     const SizedBox(height: 8),
 
@@ -841,6 +821,13 @@ class _PosScreenState extends State<PosScreen> {
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       ),
                       onPressed: () async {
+                        // Popup konfirmasi "Sudah lunas?" utk metode NON-TUNAI
+                        // (kalau di-enable owner di Setup). Tunai skip (uang udah di tangan).
+                        final isCash = pos.isCashMethod(pos.paymentMethod);
+                        if (pos.popupConfirmPayment && !isCash) {
+                          final confirmed = await _showPaymentConfirmDialog(ctx, pos.paymentMethod, pos.totalAmount);
+                          if (confirmed != true) return; // batal
+                        }
                         final itemsCopy = List<CartItem>.from(pos.cartItems);
                         final trx = await pos.checkout(pos.activeCashierDisplay);
                         if (!mounted) return;
@@ -870,6 +857,54 @@ class _PosScreenState extends State<PosScreen> {
           },
         );
       },
+    );
+  }
+
+  /// Popup konfirmasi "Sudah lunas?" utk metode non-tunai (QRIS/Transfer/dst).
+  /// Return true kalau 'Sudah', false/null kalau batal.
+  Future<bool?> _showPaymentConfirmDialog(BuildContext ctx, String method, int total) async {
+    return showDialog<bool>(
+      context: ctx,
+      barrierDismissible: false,
+      builder: (dlgCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('✅ Konfirmasi Pembayaran', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.payment, size: 48, color: const Color(0xFF7A5540)),
+            const SizedBox(height: 12),
+            Text(
+              'Metode: $method',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 4),
+            Text('Total: Rp$total', style: const TextStyle(fontSize: 13, color: Colors.grey)),
+            const SizedBox(height: 16),
+            const Text(
+              'Pastikan pembayaran sudah masuk/terverifikasi di aplikasi pembayaran sebelum melanjutkan.',
+              style: TextStyle(fontSize: 12, color: Colors.black87),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            const Text('Sudah lunas?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF356A58))),
+          ],
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+            onPressed: () => Navigator.pop(dlgCtx, false),
+            child: const Text('Belum'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF356A58), foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(dlgCtx, true),
+            child: const Text('Sudah'),
+          ),
+        ],
+      ),
     );
   }
 

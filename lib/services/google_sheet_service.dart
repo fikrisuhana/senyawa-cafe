@@ -1406,53 +1406,84 @@ class GoogleSheetService {
     return n;
   }
 
-  /// Tulis tab Setup (key,value) — default shifts kalau kosong.
-  /// Owner bisa edit nilai 'shifts' di Sheet untuk atur daftar shift app.
-  Future<void> pushSetup(String id, {String defaultShifts = 'Pagi,Siang,Sore,Malam'}) async {
+  /// Tulis tab Setup (key,value) — default shifts + payment_methods + popup konfirmasi.
+  /// Idempotent per key: hanya tulis key yg belum ada di Sheet (jangan overwrite setting owner).
+  Future<void> pushSetup(String id, {
+    String defaultShifts = 'Pagi,Siang,Sore,Malam',
+    String defaultPaymentMethods = 'Tunai,QRIS,Transfer',
+    String defaultPopupConfirm = 'true',
+  }) async {
     if (_api == null) return;
-    // Cek dulu apakah tab Setup sudah berisi.
-    List<List<Object?>> rows;
+    // Baca keys yg sudah ada.
+    final Set<String> existingKeys = {};
     try {
-      final res = await _api!.spreadsheets.values.get(id, "'Setup'!A2:B100");
-      final existing = res.values ?? [];
-      // Kalau sudah ada baris 'shifts', pertahankan nilai owner.
-      if (existing.any((r) => r.isNotEmpty && r[0].toString() == 'shifts')) {
-        return; // jangan overwrite setting owner
+      final res = await _api!.spreadsheets.values.get(id, "'Setup'!A2:A100");
+      for (final r in res.values ?? <List<Object?>>[]) {
+        if (r.isNotEmpty) existingKeys.add(r[0].toString());
       }
-      rows = [
-        _tabs['Setup']!,
-        ['shifts', defaultShifts],
-      ];
-    } catch (_) {
-      rows = [
-        _tabs['Setup']!,
-        ['shifts', defaultShifts],
-      ];
+    } catch (_) {}
+
+    // Daftar key + nilai default → hanya append yg belum ada.
+    final defaults = <String, String>{
+      'shifts': defaultShifts,
+      'payment_methods': defaultPaymentMethods,
+      'popup_konfirmasi_bayar': defaultPopupConfirm,
+    };
+    final toAdd = <List<Object?>>[];
+    for (final e in defaults.entries) {
+      if (!existingKeys.contains(e.key)) toAdd.add([e.key, e.value]);
     }
-    await _writeTab(id, 'Setup', rows);
-    debugPrint('⚙️ Setup ditulis (shifts default: $defaultShifts).');
+    if (toAdd.isEmpty) return; // semua key sudah ada
+
+    // Append (bukan overwrite) supaya setting owner aman.
+    await _api!.spreadsheets.values.append(
+      gs.ValueRange(values: toAdd),
+      id, "'Setup'!A1",
+      valueInputOption: 'RAW',
+    );
+    debugPrint('⚙️ Setup: ${toAdd.length} key default ditambahkan.');
   }
 
   /// Baca daftar shift dari tab Setup (key='shifts', value='Pagi,Siang,...').
-  /// Dipakai app buat TabBar absen. Fallback default kalau tab/Sheet blom ada.
   Future<List<String>> pullShifts(String id, {List<String> fallback = const ['Pagi', 'Sore']}) async {
-    if (_api == null) return fallback;
+    final v = await _pullSetupValue(id, 'shifts');
+    if (v == null) return fallback;
+    final list = v.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    return list.isEmpty ? fallback : list;
+  }
+
+  /// Baca daftar metode pembayaran dari tab Setup (key='payment_methods').
+  Future<List<String>> pullPaymentMethods(String id, {List<String> fallback = const ['Tunai', 'QRIS', 'Transfer']}) async {
+    final v = await _pullSetupValue(id, 'payment_methods');
+    if (v == null) return fallback;
+    final list = v.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    return list.isEmpty ? fallback : list;
+  }
+
+  /// Baca flag popup konfirmasi bayar dari Setup (key='popup_konfirmasi_bayar').
+  Future<bool> pullPopupConfirm(String id, {bool fallback = true}) async {
+    final v = await _pullSetupValue(id, 'popup_konfirmasi_bayar');
+    if (v == null) return fallback;
+    final low = v.trim().toLowerCase();
+    return low == 'true' || low == '1' || low == 'ya' || low == 'y';
+  }
+
+  /// Helper: ambil 1 nilai dari tab Setup by key. Null kalau ga ada/error.
+  Future<String?> _pullSetupValue(String id, String key) async {
+    if (_api == null) return null;
     try {
       final res = await _api!.spreadsheets.values.get(id, "'Setup'!A2:B100");
       for (final r in res.values ?? <List<Object?>>[]) {
-        if (r.isNotEmpty && r[0].toString().trim() == 'shifts') {
-          final val = r.length > 1 ? r[1].toString() : '';
-          final list = val.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
-          return list.isEmpty ? fallback : list;
+        if (r.isNotEmpty && r[0].toString().trim() == key) {
+          return r.length > 1 ? r[1].toString() : '';
         }
       }
     } catch (e) {
-      debugPrint('Pull shifts gagal: $e');
+      debugPrint('Pull Setup[$key] gagal: $e');
     }
-    return fallback;
+    return null;
   }
 
-  /// Pull absensi dari tab Absensi (Sheet) → SQLite, untuk bulan berjalan.
   /// Pull absensi dari tab Absensi (Sheet) → SQLite.
   /// Aturan 1 karyawan 1 shift/hari: ambil baris TERBARU per (karyawan, tanggal)
   /// sebagai sumber kebenaran. Kalau baris terbaru shift kosong → anggap batal.
