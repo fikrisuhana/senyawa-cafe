@@ -32,18 +32,23 @@ class GoogleSheetService {
   gd.DriveApi? _driveApi;
 
   // Tab & header yang ditulis ke Sheet
+  // Tab & header yang ditulis ke Sheet.
+  // Grup 1 (LAPORAN): Dashboard, Rekap_Bulanan, Absensi_Matriks — owner baca ini.
+  // Grup 2 (SETUP): Menu_Resep, Varian, Bahan, Voucher — master data, boleh diedit.
+  // Grup 3 (RAW DATA): Transaksi, Transaksi_Item, Kas, Restok_Log, Absensi — append-only.
   static const _tabs = <String, List<String>>{
     'Dashboard': ['Ringkasan Indikator POS', 'Nilai Hari Ini', 'Keterangan Auto-Formula'],
-    'Menu': ['nama', 'kategori', 'harga', 'modal', 'aktif', 'urutan'],
-    'Menu_Bahan': ['menu', 'bahan', 'qty'],
-    'Varian': ['menu', 'grup', 'tipe', 'wajib', 'opsi', 'tambahan_harga'],
-    'Varian_Bahan': ['menu', 'grup', 'opsi', 'bahan', 'qty'],
+    'Rekap_Bulanan': ['bulan', 'omzet', 'transaksi', 'rata_rata', 'tunai', 'qris', 'transfer', 'diskon', 'modal', 'laba_kotor', 'kas_masuk', 'kas_keluar'],
+    'Absensi_Matriks': ['tgl'],
+    'Menu_Resep': ['nama', 'kategori', 'harga', 'modal', 'aktif', 'urutan', 'bahan', 'qty_bahan'],
+    'Varian': ['menu', 'grup', 'tipe', 'wajib', 'opsi', 'tambahan_harga', 'bahan_opsi', 'qty_opsi'],
     'Bahan': ['nama', 'satuan', 'stok_utama', 'stok_min', 'total_penambahan_stok', 'total_stok_tersedia'],
-    'Restok_Log': ['waktu', 'nama_bahan', 'jumlah_tambah', 'satuan', 'stok_akhir'],
     'Voucher': ['nama', 'tipe', 'nilai', 'aktif', 'kuota', 'terpakai', 'berlaku_dari', 'berlaku_sampai'],
     'Transaksi': ['kode', 'hari_usaha', 'waktu', 'kasir', 'tipe', 'metode', 'subtotal', 'diskon', 'voucher', 'total', 'status'],
-    'Absensi': ['hari_usaha', 'karyawan', 'shift', 'waktu'],
+    'Transaksi_Item': ['kode_trx', 'menu', 'varian', 'qty', 'harga', 'subtotal'],
     'Kas': ['hari_usaha', 'tipe', 'nominal', 'kategori', 'catatan', 'oleh', 'waktu'],
+    'Restok_Log': ['waktu', 'nama_bahan', 'jumlah_tambah', 'satuan', 'stok_akhir'],
+    'Absensi': ['hari_usaha', 'karyawan', 'shift', 'waktu'],
   };
 
   bool get isConnected => _account != null && _api != null;
@@ -204,7 +209,7 @@ class GoogleSheetService {
 
   Future<bool> _menuTabEmpty(String id) async {
     try {
-      final res = await _api!.spreadsheets.values.get(id, "'Menu'!A2:A2");
+      final res = await _api!.spreadsheets.values.get(id, "'Menu_Resep'!A2:A2");
       return res.values == null || res.values!.isEmpty;
     } catch (_) {
       return true;
@@ -220,55 +225,88 @@ class GoogleSheetService {
     );
   }
 
-  /// Tulis katalog (Menu/Bahan/Voucher) + header semua tab.
+  /// Tulis katalog (Menu_Resep/Varian/Bahan/Voucher) + header semua tab.
+  /// Menu & bahan base di-merge ke 1 tab Menu_Resep; Varian & bahan opsi di-merge ke Varian.
   Future<void> pushCatalog(String id) async {
     if (_api == null) return;
     final db = DbHelper();
 
-    // Header dulu untuk semua tab (Dashboard di-handle pushDashboard).
+    // Header dulu untuk semua tab (Dashboard/Rekap/Matriks di-handle method khusus).
     for (final e in _tabs.entries) {
-      if (e.key == 'Dashboard') continue;
+      if (e.key == 'Dashboard' ||
+          e.key == 'Rekap_Bulanan' ||
+          e.key == 'Absensi_Matriks') {
+        continue;
+      }
       await _writeTab(id, e.key, [e.value]);
     }
 
+    // --- Menu_Resep: menu + bahan base di-join (bahan dipisah ";") ---
     final menus = await db.getMenuItems();
-    await _writeTab(id, 'Menu', [
-      _tabs['Menu']!,
-      ...menus.map((m) => [m.name, m.category, m.price, m.cost, m.active ? 1 : 0, m.sortOrder]),
-    ]);
-
-    // Resep bahan base per menu
     final menuStocks = await db.getAllMenuStocks();
-    await _writeTab(id, 'Menu_Bahan', [
-      _tabs['Menu_Bahan']!,
-      ...menuStocks.map((s) => [s['menu_name'], s['packaging_name'], s['qty']]),
+    // Kelompokkan bahan per menu: { menuName: [{bahan, qty}, ...] }
+    final Map<String, List<Map<String, dynamic>>> resepByMenu = {};
+    for (final s in menuStocks) {
+      final m = (s['menu_name'] ?? '').toString();
+      resepByMenu.putIfAbsent(m, () => []).add({
+        'bahan': s['packaging_name'],
+        'qty': s['qty'],
+      });
+    }
+    await _writeTab(id, 'Menu_Resep', [
+      _tabs['Menu_Resep']!,
+      ...menus.map((m) {
+        final resep = resepByMenu[m.name] ?? [];
+        final bahanStr = resep.map((r) => r['bahan']).join('; ');
+        final qtyStr = resep.map((r) => r['qty']).join('; ');
+        return [m.name, m.category, m.price, m.cost, m.active ? 1 : 0, m.sortOrder, bahanStr, qtyStr];
+      }),
     ]);
 
-    // Varian: 1 baris per opsi, plus tipe/wajib dari grupnya
+    // --- Varian: grup+opsi + bahan opsi di-merge ---
     final groups = await db.getAllVariantGroups();
     final gMap = {for (final g in groups) '${g.menuName}||${g.groupName}': g};
     final options = await db.getAllVariantOptions();
+    final vStocks = await db.getAllVariantOptionStocks();
+    // Kelompokkan bahan per (menu|grup|opsi)
+    String stkKey(String mn, String gn, String on) => '$mn|$gn|$on';
+    final Map<String, List<Map<String, dynamic>>> bahanOpsi = {};
+    for (final s in vStocks) {
+      final k = stkKey(
+        (s['menu_name'] ?? '').toString(),
+        (s['group_name'] ?? '').toString(),
+        (s['option_name'] ?? '').toString(),
+      );
+      bahanOpsi.putIfAbsent(k, () => []).add({
+        'bahan': s['packaging_name'],
+        'qty': s['qty'],
+      });
+    }
     await _writeTab(id, 'Varian', [
       _tabs['Varian']!,
       ...options.map((o) {
         final g = gMap['${o.menuName}||${o.groupName}'];
         final tipe = (g?.type == 'MULTI') ? 'Boleh banyak' : 'Pilih 1';
         final wajib = (g?.required ?? false) ? 'Ya' : 'Tidak';
-        return [o.menuName, o.groupName, tipe, wajib, o.optionName, o.priceDelta];
+        final bk = bahanOpsi[stkKey(o.menuName, o.groupName, o.optionName)] ?? [];
+        final bahanStr = bk.map((r) => r['bahan']).join('; ');
+        final qtyStr = bk.map((r) => r['qty']).join('; ');
+        return [o.menuName, o.groupName, tipe, wajib, o.optionName, o.priceDelta, bahanStr, qtyStr];
       }),
     ]);
 
-    // Bahan khusus per opsi varian (mis. Dingin → cup plastik)
-    final vStocks = await db.getAllVariantOptionStocks();
-    await _writeTab(id, 'Varian_Bahan', [
-      _tabs['Varian_Bahan']!,
-      ...vStocks.map((s) => [s['menu_name'], s['group_name'], s['option_name'], s['packaging_name'], s['qty']]),
-    ]);
-
+    // --- Bahan: 6 kolom (fix bug: sebelumnya cuma tulis 4) ---
     final bahan = await db.getPackagings();
     await _writeTab(id, 'Bahan', [
       _tabs['Bahan']!,
-      ...bahan.map((b) => [b.name, b.unit, b.stock, b.minStock]),
+      ...bahan.map((b) => [
+            b.name,
+            b.unit,
+            b.stock,           // stok_utama
+            b.minStock,        // stok_min
+            '',                // total_penambahan_stok (diisi via rumus opsional nanti)
+            b.stock,           // total_stok_tersedia (= stok saat ini)
+          ]),
     ]);
 
     final vouchers = await db.getVouchers(onlyActive: false);
@@ -281,11 +319,21 @@ class GoogleSheetService {
     ]);
     debugPrint('⬆️ Katalog terkirim ke Sheet: ${menus.length} menu, ${bahan.length} bahan, ${vouchers.length} voucher.');
 
-    // Isi/segarkan tab Dashboard.
+    // Isi/segarkan tab laporan.
     try {
       await pushDashboard(id);
     } catch (e) {
       debugPrint('Dashboard gagal diisi: $e');
+    }
+    try {
+      await pushRekapBulanan(id);
+    } catch (e) {
+      debugPrint('Rekap bulanan gagal: $e');
+    }
+    try {
+      await pushAbsensiMatriks(id);
+    } catch (e) {
+      debugPrint('Absensi matriks gagal: $e');
     }
   }
 
@@ -376,10 +424,48 @@ class GoogleSheetService {
     kv('Tingkat pembatalan', 'IFERROR(COUNTIF(Transaksi!K:K,"VOID")/COUNTA(Transaksi!A2:A),0)', bfmt: 'pct');
     gap();
 
+    // TOP 5 MENU HARI INI — dari tab Transaksi_Item (menu + qty) join kode hari ini.
+    sec('▌ TOP 5 MENU — HARI INI');
+    // QUERY langsung return 5 baris (menu, total qty) utk trx yg kodenya diawali prefix hari ini.
+    // Ditulis di 1 sel; Sheet akan tumpah ke bawah (array formula).
+    final kodePrefixHari = 'TRX-TEXT(TODAY(),"yyyyMMdd")';
+    kv('Lihat 5 terlaris di bawah ↓',
+      'IFERROR(QUERY(Transaksi_Item!A2:F,"SELECT B, SUM(D) WHERE A STARTS WITH \'$kodePrefixHari\' GROUP BY B LABEL SUM(D) \'Qty\' ORDER BY SUM(D) DESC LIMIT 5",0),"belum ada data")',
+      bfmt: 'int', note: 'menu + total qty terjual hari ini');
+    gap();
+
+    // JAM SIBUK HARI INI — omzet per jam (07-23). Dipakai juga buat chart bar.
+    sec('▌ JAM SIBUK — HARI INI (omzet per jam)');
+    for (int jam = 7; jam <= 23; jam++) {
+      final jamStr = jam.toString().padLeft(2, '0');
+      kv('$jamStr:00 - ${((jam + 1) % 24).toString().padLeft(2, '0')}:00',
+        'SUMPRODUCT((TEXT(Transaksi!C2:C,"yyyy-mm-dd")=$h)*(HOUR(Transaksi!C2:C)=$jam)*(Transaksi!K2:K="ACTIVE")*Transaksi!J2:J)',
+        bfmt: 'rp', note: '');
+    }
+    gap();
+
+    // AUDIT VOID — tracking transaksi dibatalkan hari ini & bulan ini.
+    sec('▌ AUDIT VOID — TRANSAKSI DIBATALKAN');
+    kv('Jumlah VOID hari ini', 'COUNTIFS(Transaksi!B:B,$h,Transaksi!K:K,"VOID")', bfmt: 'int');
+    kv('Nilai VOID hari ini', 'SUMIFS(Transaksi!J:J,Transaksi!B:B,$h,Transaksi!K:K,"VOID")', note: 'estimasi nilai');
+    kv('Jumlah VOID bulan ini', 'COUNTIFS(Transaksi!B:B,$b,Transaksi!K:K,"VOID")', bfmt: 'int');
+    kv('Nilai VOID bulan ini', 'SUMIFS(Transaksi!J:J,Transaksi!B:B,$b,Transaksi!K:K,"VOID")');
+    gap();
+
     sec('▌ KATALOG & STAF');
-    kv('Menu aktif', 'COUNTIF(Menu!E2:E,1)', bfmt: 'int', note: 'aktif = 1');
+    kv('Menu aktif', 'COUNTIF(Menu_Resep!E2:E,1)', bfmt: 'int', note: 'aktif = 1');
     kv('Voucher aktif', 'COUNTIF(Voucher!D2:D,1)', bfmt: 'int');
     kv('Karyawan hadir hari ini', 'COUNTIF(Absensi!A2:A,$h)', bfmt: 'int', note: 'dari tab Absensi');
+
+    // Tabel mini di kolom E-G untuk chart: 7 hari terakhir (tanggal × omzet).
+    final values7d = <List<Object?>>[];
+    for (int i = 6; i >= 0; i--) {
+      final dLabel = 'TEXT(TODAY()-$i,"yyyy-mm-dd")';
+      values7d.add([
+        '=TEXT(TODAY()-$i,"dd/mm")',
+        '=SUMIFS(Transaksi!J:J,Transaksi!B:B,$dLabel,Transaksi!K:K,"ACTIVE")',
+      ]);
+    }
 
     // Bersihkan lalu tulis nilai.
     try {
@@ -387,6 +473,19 @@ class GoogleSheetService {
     } catch (_) {}
     await _api!.spreadsheets.values.update(
       gs.ValueRange(values: values), id, "'Dashboard'!A1", valueInputOption: 'USER_ENTERED');
+
+    // Tulis tabel 7 hari terakhir di kolom E-F (untuk chart).
+    try {
+      await _api!.spreadsheets.values.clear(gs.ClearValuesRequest(), id, "'Dashboard'!E1:F10");
+      await _api!.spreadsheets.values.update(
+        gs.ValueRange(values: [
+          ['Tanggal', 'Omzet'],
+          ...values7d,
+        ]),
+        id, "'Dashboard'!E1", valueInputOption: 'USER_ENTERED');
+    } catch (e) {
+      debugPrint('Tabel 7 hari gagal: $e');
+    }
 
     // Format biar josjis (judul, seksi, currency, persen, lebar kolom).
     try {
@@ -396,6 +495,197 @@ class GoogleSheetService {
       debugPrint('Format dashboard gagal: $e');
     }
     debugPrint('📊 Dashboard diperbarui (josjis, rumus live).');
+
+    // Tambah chart native (bar/pie) — idempotent: hapus chart lama dulu.
+    try {
+      await addDashboardCharts(id);
+    } catch (e) {
+      debugPrint('Chart dashboard gagal: $e');
+    }
+  }
+
+  /// Tambah 3 chart native di tab Dashboard: (1) bar omzet 7 hari,
+  /// (2) pie metode pembayaran hari ini, (3) bar jam sibuk.
+  /// Idempotent: hapus semua embedded object (chart) lama dulu supaya tak numpuk.
+  Future<void> addDashboardCharts(String id) async {
+    if (_api == null) return;
+    final sid = await _sheetId(id, 'Dashboard');
+    if (sid == null) return;
+
+    // 1. Ambil daftar chart lama → hapus semua.
+    final reqs = <gs.Request>[];
+    final ss = await _api!.spreadsheets.get(id);
+    final dashSheet = (ss.sheets ?? []).firstWhere(
+      (s) => s.properties?.sheetId == sid,
+      orElse: () => gs.Sheet(),
+    );
+    final existingCharts = dashSheet.charts ?? <gs.EmbeddedChart>[];
+    for (final c in existingCharts) {
+      if (c.chartId != null) {
+        reqs.add(gs.Request(deleteEmbeddedObject: gs.DeleteEmbeddedObjectRequest(objectId: c.chartId)));
+      }
+    }
+
+    // Helper: ChartData dari range A1-notation (di tab Dashboard sendiri).
+    gs.ChartData dataOf(String rangeA1) => gs.ChartData(
+          sourceRange: gs.ChartSourceRange(
+            sources: [_gridRangeFromA1(sid, rangeA1)],
+          ),
+        );
+
+    // --- CHART 1: Bar omzet 7 hari terakhir (sumber: E1:F8 tabel mini) ---
+    reqs.add(gs.Request(addChart: gs.AddChartRequest(chart: gs.EmbeddedChart(
+      chartId: 1001,
+      position: gs.EmbeddedObjectPosition(
+        overlayPosition: gs.OverlayPosition(
+          anchorCell: gs.GridCoordinate(sheetId: sid, rowIndex: 0, columnIndex: 6),
+          widthPixels: 380,
+          heightPixels: 220,
+        ),
+      ),
+      spec: gs.ChartSpec(
+        title: 'Omzet 7 Hari Terakhir',
+        basicChart: gs.BasicChartSpec(
+          chartType: 'COLUMN',
+          legendPosition: 'NO_LEGEND',
+          headerCount: 1,
+          domains: [gs.BasicChartDomain(domain: dataOf('Dashboard!E1:E8'))],
+          series: [gs.BasicChartSeries(series: dataOf('Dashboard!F1:F8'), targetAxis: 'LEFT_AXIS')],
+          axis: [
+            gs.BasicChartAxis(position: 'BOTTOM_AXIS', title: 'Tanggal'),
+            gs.BasicChartAxis(position: 'LEFT_AXIS', title: 'Omzet'),
+          ],
+        ),
+      ),
+    ))));
+
+    // --- CHART 2: Pie metode pembayaran hari ini ---
+    // Sumber: tabel kecil H1:I4 (label metode + omzet) — ditulis dulu.
+    try {
+      await _api!.spreadsheets.values.update(
+        gs.ValueRange(values: [
+          ['Metode', 'Omzet'],
+          ['Tunai', '=SUMIFS(Transaksi!J:J,Transaksi!B:B,TEXT(TODAY(),"yyyy-mm-dd"),Transaksi!F:F,"CASH",Transaksi!K:K,"ACTIVE")'],
+          ['QRIS', '=SUMIFS(Transaksi!J:J,Transaksi!B:B,TEXT(TODAY(),"yyyy-mm-dd"),Transaksi!F:F,"QRIS",Transaksi!K:K,"ACTIVE")'],
+          ['Transfer', '=SUMIFS(Transaksi!J:J,Transaksi!B:B,TEXT(TODAY(),"yyyy-mm-dd"),Transaksi!F:F,"TRANSFER",Transaksi!K:K,"ACTIVE")'],
+        ]),
+        id, "'Dashboard'!H1", valueInputOption: 'USER_ENTERED',
+      );
+    } catch (e) {
+      debugPrint('Tabel metode gagal: $e');
+    }
+    reqs.add(gs.Request(addChart: gs.AddChartRequest(chart: gs.EmbeddedChart(
+      chartId: 1002,
+      position: gs.EmbeddedObjectPosition(
+        overlayPosition: gs.OverlayPosition(
+          anchorCell: gs.GridCoordinate(sheetId: sid, rowIndex: 12, columnIndex: 6),
+          widthPixels: 380,
+          heightPixels: 220,
+        ),
+      ),
+      spec: gs.ChartSpec(
+        title: 'Metode Pembayaran — Hari Ini',
+        pieChart: gs.PieChartSpec(
+          domain: dataOf('Dashboard!H1:H4'),
+          series: dataOf('Dashboard!I1:I4'),
+          legendPosition: 'BOTTOM_LEGEND',
+        ),
+      ),
+    ))));
+
+    // --- CHART 3: Bar jam sibuk hari ini (omzet per jam) ---
+    // Sumber: tabel kecil K1:L18 (label jam 07-23 + omzet) — ditulis dulu.
+    final jamRows = <List<Object?>>[['Jam', 'Omzet']];
+    for (int jam = 7; jam <= 23; jam++) {
+      jamRows.add([
+        '$jam:00',
+        '=SUMPRODUCT((TEXT(Transaksi!C2:C,"yyyy-mm-dd")=TEXT(TODAY(),"yyyy-mm-dd"))*(HOUR(Transaksi!C2:C)=$jam)*(Transaksi!K2:K="ACTIVE")*Transaksi!J2:J)',
+      ]);
+    }
+    try {
+      await _api!.spreadsheets.values.update(
+        gs.ValueRange(values: jamRows),
+        id, "'Dashboard'!K1", valueInputOption: 'USER_ENTERED',
+      );
+    } catch (e) {
+      debugPrint('Tabel jam sibuk gagal: $e');
+    }
+    reqs.add(gs.Request(addChart: gs.AddChartRequest(chart: gs.EmbeddedChart(
+      chartId: 1003,
+      position: gs.EmbeddedObjectPosition(
+        overlayPosition: gs.OverlayPosition(
+          anchorCell: gs.GridCoordinate(sheetId: sid, rowIndex: 24, columnIndex: 6),
+          widthPixels: 380,
+          heightPixels: 260,
+        ),
+      ),
+      spec: gs.ChartSpec(
+        title: 'Jam Sibuk — Hari Ini',
+        basicChart: gs.BasicChartSpec(
+          chartType: 'BAR',
+          legendPosition: 'NO_LEGEND',
+          headerCount: 1,
+          domains: [gs.BasicChartDomain(domain: dataOf('Dashboard!K1:K18'))],
+          series: [gs.BasicChartSeries(series: dataOf('Dashboard!L1:L18'), targetAxis: 'LEFT_AXIS')],
+          axis: [
+            gs.BasicChartAxis(position: 'BOTTOM_AXIS', title: 'Omzet'),
+            gs.BasicChartAxis(position: 'LEFT_AXIS', title: 'Jam'),
+          ],
+        ),
+      ),
+    ))));
+
+    if (reqs.isNotEmpty) {
+      await _api!.spreadsheets.batchUpdate(
+        gs.BatchUpdateSpreadsheetRequest(requests: reqs), id);
+    }
+    debugPrint('📊 3 chart dashboard ditambahkan.');
+  }
+
+  /// Konversi range A1 sederhana (1 area, 1 sheet) → GridRange.
+  /// Mendukung format "Sheet!A1:B8". Implementasi minimal sesuai kebutuhan chart.
+  gs.GridRange _gridRangeFromA1(int sheetId, String a1) {
+    // Pisahkan nama sheet (sebelum '!').
+    String range;
+    final bang = a1.indexOf('!');
+    range = bang >= 0 ? a1.substring(bang + 1) : a1;
+
+    final colon = range.indexOf(':');
+    final startA1 = colon >= 0 ? range.substring(0, colon) : range;
+    final endA1 = colon >= 0 ? range.substring(colon + 1) : range;
+
+    final sc = _colNum(startA1);
+    final sr = _rowNum(startA1);
+    final ec = _colNum(endA1);
+    final er = _rowNum(endA1);
+
+    return gs.GridRange(
+      sheetId: sheetId,
+      startColumnIndex: sc,
+      startRowIndex: sr,
+      endColumnIndex: ec + 1,
+      endRowIndex: er + 1,
+    );
+  }
+
+  /// Ekstrak nomor kolom (0-based) dari A1 cell like "A1", "AB12".
+  int _colNum(String cell) {
+    var col = 0;
+    var i = 0;
+    while (i < cell.length && RegExp(r'[A-Za-z]').hasMatch(cell[i])) {
+      col = col * 26 + (cell[i].toUpperCase().codeUnitAt(0) - 64);
+      i++;
+    }
+    return col - 1; // 0-based
+  }
+
+  /// Ekstrak nomor baris (0-based) dari A1 cell.
+  int _rowNum(String cell) {
+    var num = '';
+    for (final ch in cell.split('')) {
+      if (RegExp(r'\d').hasMatch(ch)) num += ch;
+    }
+    return (int.tryParse(num) ?? 1) - 1; // 0-based
   }
 
   /// Ambil nama karyawan aktif (buat baris kinerja kasir dinamis).
@@ -489,6 +779,219 @@ class GoogleSheetService {
     await _api!.spreadsheets.batchUpdate(gs.BatchUpdateSpreadsheetRequest(requests: reqs), id);
   }
 
+  /// Tulis tab Rekap_Bulanan: 1 baris per bulan (auto-grow dari data Transaksi).
+  /// Tiap baris berisi rumus SUMIFS/COUNTIFS ke tab Transaksi & Kas bulan tsb.
+  /// Owner bisa lihat semua bulan lampau (data tak pernah dihapus).
+  Future<void> pushRekapBulanan(String id) async {
+    if (_api == null) return;
+    final header = _tabs['Rekap_Bulanan']!;
+
+    // Ambil semua hari_usaha unik dari tab Transaksi kolom B.
+    final Set<String> bulanSet = {};
+    try {
+      final res = await _api!.spreadsheets.values.get(id, "'Transaksi'!B2:B");
+      for (final row in res.values ?? <List<Object?>>[]) {
+        if (row.isEmpty) continue;
+        final v = row[0].toString();
+        if (v.length >= 7) bulanSet.add(v.substring(0, 7)); // "YYYY-MM"
+      }
+    } catch (e) {
+      debugPrint('Baca bulan unik gagal: $e');
+    }
+    final bulans = bulanSet.toList()..sort();
+
+    final values = <List<Object?>>[header];
+    for (final b in bulans) {
+      final bm = '$b-*'; // wildcard bulan, mis. "2026-08-*"
+      // Kolom mengacu: Transaksi B=hari_usaha, F=metode, G=subtotal, H=diskon,
+      // I=voucher, J=total, K=status. Transaksi_Item: B=menu, D=qty, F=subtotal.
+      // modal di-estimasi via SUMIFS cost total tidak ada di tab; pakai subtotal? →
+      // sekarang cost_total belum dikirim ke Sheet, jadi modal dikosongkan (0) sampai ditambahkan.
+      values.add([
+        b, // bulan (YYYY-MM)
+        '=SUMIFS(Transaksi!J:J,Transaksi!B:B,"$bm",Transaksi!K:K,"ACTIVE")', // omzet
+        '=COUNTIFS(Transaksi!B:B,"$bm",Transaksi!K:K,"ACTIVE")', // transaksi
+        '=IFERROR(SUMIFS(Transaksi!J:J,Transaksi!B:B,"$bm",Transaksi!K:K,"ACTIVE")/COUNTIFS(Transaksi!B:B,"$bm",Transaksi!K:K,"ACTIVE"),0)', // rata_rata
+        '=SUMIFS(Transaksi!J:J,Transaksi!B:B,"$bm",Transaksi!F:F,"CASH",Transaksi!K:K,"ACTIVE")', // tunai
+        '=SUMIFS(Transaksi!J:J,Transaksi!B:B,"$bm",Transaksi!F:F,"QRIS",Transaksi!K:K,"ACTIVE")', // qris
+        '=SUMIFS(Transaksi!J:J,Transaksi!B:B,"$bm",Transaksi!F:F,"TRANSFER",Transaksi!K:K,"ACTIVE")', // transfer
+        '=SUMIFS(Transaksi!H:H,Transaksi!B:B,"$bm",Transaksi!K:K,"ACTIVE")', // diskon
+        0, // modal (cost_total belum di-sync ke Sheet; sementara 0)
+        '=SUMIFS(Transaksi!J:J,Transaksi!B:B,"$bm",Transaksi!K:K,"ACTIVE")', // laba_kotor (omzet - modal, modal=0)
+        '=SUMIFS(Kas!C:C,Kas!A:A,"$bm*",Kas!B:B,"MASUK")', // kas_masuk
+        '=SUMIFS(Kas!C:C,Kas!A:A,"$bm*",Kas!B:B,"KELUAR")', // kas_keluar
+      ]);
+    }
+
+    // Tulis ulang tabel (clear dulu lalu update).
+    try {
+      await _api!.spreadsheets.values.clear(gs.ClearValuesRequest(), id, "'Rekap_Bulanan'!A1:L200");
+    } catch (_) {}
+    await _api!.spreadsheets.values.update(
+      gs.ValueRange(values: values),
+      id,
+      "'Rekap_Bulanan'!A1",
+      valueInputOption: 'USER_ENTERED',
+    );
+
+    // Format: freeze header + currency kolom B,D,E,F,G,H,I,J,K,L.
+    try {
+      final sid = await _sheetId(id, 'Rekap_Bulanan');
+      if (sid != null) await _formatRekapBulanan(id, sid);
+    } catch (e) {
+      debugPrint('Format Rekap_Bulanan gagal: $e');
+    }
+    debugPrint('📅 Rekap_Bulanan diperbarui: ${bulans.length} bulan.');
+  }
+
+  /// Format tab Rekap_Bulanan: freeze header, lebar kolom, currency.
+  Future<void> _formatRekapBulanan(String id, int sid) async {
+    final reqs = <gs.Request>[];
+    final range = gs.GridRange(sheetId: sid, startRowIndex: 1, endRowIndex: 2, startColumnIndex: 0, endColumnIndex: 12);
+    // Header bold + background coklat.
+    reqs.add(gs.Request(repeatCell: gs.RepeatCellRequest(
+      range: gs.GridRange(sheetId: sid, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 12),
+      cell: gs.CellData(userEnteredFormat: gs.CellFormat(
+          backgroundColor: _rgb(0x7A5540),
+          textFormat: gs.TextFormat(bold: true, foregroundColor: _rgb(0xFFFFFF)))),
+      fields: 'userEnteredFormat(backgroundColor,textFormat)',
+    )));
+    // Currency untuk kolom omzet..kas_keluar (B,D,E,F,G,H,I,J,K,L = index 1,3,4,5,6,7,8,9,10,11). C(count)=2 skip.
+    final rpCols = [1, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+    for (final c in rpCols) {
+      reqs.add(gs.Request(repeatCell: gs.RepeatCellRequest(
+        range: gs.GridRange(sheetId: sid, startRowIndex: 1, startColumnIndex: c, endColumnIndex: c + 1),
+        cell: gs.CellData(userEnteredFormat: gs.CellFormat(
+            numberFormat: gs.NumberFormat(type: 'CURRENCY', pattern: '"Rp"#,##0'))),
+        fields: 'userEnteredFormat.numberFormat',
+      )));
+    }
+    // Freeze header.
+    reqs.add(gs.Request(updateSheetProperties: gs.UpdateSheetPropertiesRequest(
+      properties: gs.SheetProperties(sheetId: sid, gridProperties: gs.GridProperties(frozenRowCount: 1)),
+      fields: 'gridProperties.frozenRowCount',
+    )));
+    // Suppress unused warning for `range` (placeholder untuk extend format kalau perlu).
+    // ignore: unused_local_variable
+    final _ = range;
+    await _api!.spreadsheets.batchUpdate(gs.BatchUpdateSpreadsheetRequest(requests: reqs), id);
+  }
+
+  /// Tulis tab Absensi_Matriks: tanggal × karyawan-shift bulan berjalan.
+  /// Format: kolom = "<Nama>-Pagi", "<Nama>-Sore"; isi "P"/"S" via COUNTIFS ke tab Absensi.
+  Future<void> pushAbsensiMatriks(String id) async {
+    if (_api == null) return;
+    final emps = await _activeEmployeeNames();
+    final now = DateTime.now();
+    final year = now.year;
+    final month = now.month;
+    final daysInMonth = DateTime(year, month + 1, 0).day;
+    final ym = '$year-${month.toString().padLeft(2, '0')}';
+
+    // Header: tgl | <Nama>-Pagi | <Nama>-Sore | ...
+    final header = <Object?>['tgl'];
+    for (final name in emps) {
+      header.add('$name-Pagi');
+      header.add('$name-Sore');
+    }
+
+    final values = <List<Object?>>[header];
+    for (int d = 1; d <= daysInMonth; d++) {
+      final dateStr = '$ym-${d.toString().padLeft(2, '0')}';
+      final row = <Object?>[d];
+      for (final name in emps) {
+        // Pagi → "P" kalau ada absen; Sore → "S".
+        row.add('=IF(COUNTIFS(Absensi!A:A,"$dateStr",Absensi!B:B,"$name",Absensi!C:C,"Pagi")>0,"P","")');
+        row.add('=IF(COUNTIFS(Absensi!A:A,"$dateStr",Absensi!B:B,"$name",Absensi!C:C,"Sore")>0,"S","")');
+      }
+      values.add(row);
+    }
+    // Baris total hadir per karyawan-shift (COUNTA kolom).
+    final totalRow = <Object?>['TOTAL'];
+    for (final name in emps) {
+      // Hitung "P" di kolom Pagi & "S" di kolom Sore (kolom index dinamis).
+      totalRow.add('=COUNTA({colPagi}2:{colPagi}{last})');
+      totalRow.add('=COUNTA({colSore}2:{colSore}{last})');
+    }
+    // Ganti placeholder kolom: kolom Pagi untuk karyawan ke-i = 2 + i*2, Sore = 3 + i*2 (1-based).
+    final lastRow = daysInMonth + 1;
+    for (int i = 0; i < emps.length; i++) {
+      final colPagi = _colLetter(1 + i * 2); // header tgl di index 0 → Pagi i mulai index 1 (col B)
+      final colSore = _colLetter(2 + i * 2);
+      totalRow[1 + i * 2] = '=COUNTA(${colPagi}2:${colPagi}$lastRow)';
+      totalRow[2 + i * 2] = '=COUNTA(${colSore}2:${colSore}$lastRow)';
+    }
+    values.add(totalRow);
+
+    try {
+      await _api!.spreadsheets.values.clear(
+          gs.ClearValuesRequest(), id, "'Absensi_Matriks'!A1:ZZ100");
+    } catch (_) {}
+    await _api!.spreadsheets.values.update(
+      gs.ValueRange(values: values),
+      id,
+      "'Absensi_Matriks'!A1",
+      valueInputOption: 'USER_ENTERED',
+    );
+
+    // Format: freeze header + total row bold.
+    try {
+      final sid = await _sheetId(id, 'Absensi_Matriks');
+      if (sid != null) await _formatAbsensiMatriks(id, sid, values.length, values.first.length);
+    } catch (e) {
+      debugPrint('Format Absensi_Matriks gagal: $e');
+    }
+    debugPrint('🧮 Absensi_Matriks diperbarui: $daysInMonth hari × ${emps.length} karyawan.');
+  }
+
+  /// Konversi index kolom (0-based) → huruf kolom Sheet (A, B, …, Z, AA, …).
+  String _colLetter(int index0) {
+    var n = index0;
+    var letters = '';
+    while (n >= 0) {
+      letters = String.fromCharCode((n % 26) + 65) + letters;
+      n = (n ~/ 26) - 1;
+    }
+    return letters;
+  }
+
+  /// Format tab Absensi_Matriks: header & total bold, freeze, lebar kolom tgl.
+  Future<void> _formatAbsensiMatriks(String id, int sid, int nRows, int nCols) async {
+    final reqs = <gs.Request>[];
+    final lastCol = _colLetter(nCols - 1);
+    // Header bold + background coklat.
+    reqs.add(gs.Request(repeatCell: gs.RepeatCellRequest(
+      range: gs.GridRange(sheetId: sid, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: nCols),
+      cell: gs.CellData(userEnteredFormat: gs.CellFormat(
+          backgroundColor: _rgb(0x7A5540),
+          textFormat: gs.TextFormat(bold: true, foregroundColor: _rgb(0xFFFFFF)))),
+      fields: 'userEnteredFormat(backgroundColor,textFormat)',
+    )));
+    // Baris terakhir (TOTAL) bold.
+    reqs.add(gs.Request(repeatCell: gs.RepeatCellRequest(
+      range: gs.GridRange(sheetId: sid, startRowIndex: nRows - 1, endRowIndex: nRows, startColumnIndex: 0, endColumnIndex: nCols),
+      cell: gs.CellData(userEnteredFormat: gs.CellFormat(
+          backgroundColor: _rgb(0xF5F3F0),
+          textFormat: gs.TextFormat(bold: true))),
+      fields: 'userEnteredFormat(backgroundColor,textFormat)',
+    )));
+    // Freeze baris header + kolom tgl.
+    reqs.add(gs.Request(updateSheetProperties: gs.UpdateSheetPropertiesRequest(
+      properties: gs.SheetProperties(sheetId: sid, gridProperties: gs.GridProperties(frozenRowCount: 1, frozenColumnCount: 1)),
+      fields: 'gridProperties.frozenRowCount,gridProperties.frozenColumnCount',
+    )));
+    // Lebar kolom tgl.
+    reqs.add(gs.Request(updateDimensionProperties: gs.UpdateDimensionPropertiesRequest(
+      range: gs.DimensionRange(sheetId: sid, dimension: 'COLUMNS', startIndex: 0, endIndex: 1),
+      properties: gs.DimensionProperties(pixelSize: 60),
+      fields: 'pixelSize',
+    )));
+    // Suppress unused warning.
+    // ignore: unused_local_variable
+    final _ = lastCol;
+    await _api!.spreadsheets.batchUpdate(gs.BatchUpdateSpreadsheetRequest(requests: reqs), id);
+  }
+
   /// Tambah 1 baris transaksi ke tab Transaksi (append).
   Future<void> appendTransaction(String id, Map<String, dynamic> t) async {
     if (_api == null) return;
@@ -502,6 +1005,26 @@ class GoogleSheetService {
       ]),
       id,
       "'Transaksi'!A1",
+      valueInputOption: 'RAW',
+    );
+  }
+
+  /// Tambah baris item transaksi ke tab Transaksi_Item (append).
+  /// Dipakai untuk laporan "menu terlaris" via QUERY di Dashboard.
+  Future<void> appendTransactionItems(String id, String trxCode, List<Map<String, dynamic>> items) async {
+    if (_api == null || items.isEmpty) return;
+    final rows = items.map((it) => [
+          trxCode,
+          it['name'] ?? '',
+          it['variants'] ?? '',
+          it['qty'] ?? 0,
+          it['price'] ?? 0,
+          it['subtotal'] ?? 0,
+        ]).toList();
+    await _api!.spreadsheets.values.append(
+      gs.ValueRange(values: rows),
+      id,
+      "'Transaksi_Item'!A1",
       valueInputOption: 'RAW',
     );
   }
@@ -568,7 +1091,7 @@ class GoogleSheetService {
   /// Tarik harga/modal/aktif/urutan menu dari Sheet → update SQLite (edit Sheet → app berubah).
   Future<int> pullMenuFromSheet(String id) async {
     if (_api == null) return 0;
-    final res = await _api!.spreadsheets.values.get(id, "'Menu'!A2:F");
+    final res = await _api!.spreadsheets.values.get(id, "'Menu_Resep'!A2:F");
     final rows = res.values ?? [];
     final db = await DbHelper().database;
     int updated = 0;

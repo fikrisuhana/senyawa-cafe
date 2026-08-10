@@ -134,13 +134,30 @@ class PosProvider extends ChangeNotifier {
       if (targetSheetId != null && targetSheetId.isNotEmpty) {
         _googleConnected = true;
         final unsynced = await db.getUnsyncedTransactions();
+        final hadNewTrx = unsynced.isNotEmpty;
         for (final trx in unsynced) {
           await svc.appendTransaction(targetSheetId, trx.toMap());
+          // Kirim juga item-item transaksi (buat laporan menu terlaris di Sheet).
+          final itemRows = await db.getTransactionItemRows(trx.id);
+          await svc.appendTransactionItems(targetSheetId, trx.code, itemRows);
           await db.markTransactionSynced(trx.id);
         }
         // Pull perubahan menu dari Sheet jika ada
         await svc.pullMenuFromSheet(targetSheetId);
         await loadCatalog();
+
+        // Segarkan laporan Sheet: Dashboard + Rekap_Bulanan + Absensi_Matriks.
+        // Lakukan kalau ada transaksi baru (data berubah) — hindari hammer API
+        // kalau sync periodik tanpa aktivitas.
+        if (hadNewTrx) {
+          try {
+            await svc.pushRekapBulanan(targetSheetId);
+            await svc.pushAbsensiMatriks(targetSheetId);
+            await svc.pushDashboard(targetSheetId);
+          } catch (e) {
+            debugPrint('Refresh laporan Sheet gagal: $e');
+          }
+        }
       }
 
       _lastSyncTime = DateTime.now();
