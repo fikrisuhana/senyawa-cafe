@@ -6,10 +6,16 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build Release APK
     runs-on: ubuntu-latest
+    env:
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
 
     steps:
       - name: Checkout kode
@@ -32,27 +38,22 @@ jobs:
 
       - name: Verifikasi kode (analyze)
         run: flutter analyze --no-pub
-        continue-on-error: true # info/lint cosmetik jangan gagalkan build
+        continue-on-error: true # info/lint kosmetik jangan gagalkan build
 
       # === SIGNING ===
-      # Kalau secret KEYSTORE_BASE64 & KEYSTORE_PASSWORD ada → pakai keystore release
-      # (SHA-1 konsisten = OAuth jalan). Kalau ga ada → fallback ke debug keystore.
+      # Kalau secret KEYSTORE_BASE64 & KEYSTORE_PASSWORD ada -> pakai keystore release
+      # (SHA-1 konsisten = OAuth Google jalan).
       - name: Decode keystore release (dari Secret)
         if: ${{ env.KEYSTORE_BASE64 != '' }}
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           echo "$KEYSTORE_BASE64" | base64 -d > android/app/ruang_senyawa.jks
           echo "Keystore release dipasang dari Secret."
-        working-directory: ${{ github.workspace }}
 
       - name: Tulis key.properties (dari Secret)
-        if: ${{ env.STORE_PASSWORD != '' }}
-        env:
-          STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        if: ${{ env.KEYSTORE_PASSWORD != '' }}
         run: |
           printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=ruang_senyawa.jks\n' \
-            "$STORE_PASSWORD" "$STORE_PASSWORD" "ruangsenyawa" > android/key.properties
+            "$KEYSTORE_PASSWORD" "$KEYSTORE_PASSWORD" "ruangsenyawa" > android/key.properties
           echo "key.properties ditulis."
 
       - name: Build APK release
@@ -72,20 +73,24 @@ jobs:
       - name: Buat GitHub Release dengan APK
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ github.run_number }}
-          name: Build #${{ github.run_number }}
+          tag_name: v1.0.${{ github.run_number }}
+          name: Ruang Senyawa POS v1.0.${{ github.run_number }}
           body: |
-            APK otomatis dari commit `${{ github.sha }}`.
+            ### 📱 Ruang Senyawa POS - Release Build #${{ github.run_number }}
+            Otomatis di-build dari commit `${{ github.sha }}`.
 
-            ## Cara install
-            1. Download file `app-release.apk` di bawah.
-            2. Buka di HP Android (izinkan install dari sumber tidak dikenal).
-            3. Login Google pakai email yg sudah didaftarkan owner di Google Cloud (Test users).
+            #### 📥 Cara Install:
+            1. Download file **`app-release.apk`** di bawah.
+            2. Buka dan instal di HP/Tablet Android (*izinkan Install from unknown apps*).
+            3. Buka aplikasi dan lakukan Login Google (menggunakan akun owner/tester yang didaftarkan di Google Cloud).
 
-            ## Catatan
-            - Ini build **release** dengan keystore resmi → login Google jalan jika email tester terdaftar.
-            - Tabak spreadsheet: Dashboard, Rekap_Bulanan, Absensi_Matriks, dll auto-generate saat login.
+            #### 📋 Fitur yang disertakan:
+            - Local-first POS (Katalog lengkap, Resep BOM inline, Varian).
+            - Realtime stock validation & portion estimate.
+            - Validasi voucher, kas masuk/keluar, dan rekap laci harian.
+            - Auto-sync Google Sheet (Dashboard Live KPI, Rekap Bulanan, Matriks Absensi).
           files: build/app/outputs/flutter-apk/app-release.apk
-          prerelease: true
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

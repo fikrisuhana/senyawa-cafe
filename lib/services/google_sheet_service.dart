@@ -885,54 +885,86 @@ class GoogleSheetService {
     await _api!.spreadsheets.batchUpdate(gs.BatchUpdateSpreadsheetRequest(requests: reqs), id);
   }
 
-  /// Tulis tab Absensi_Matriks: tanggal × karyawan (1 kolom per orang), bulan berjalan.
+  /// Tulis tab Absensi_Matriks: tanggal × karyawan (1 kolom per orang).
+  /// SEMUA BULAN yg ada datanya ditampilkan (bulan berjalan + bulan lampau),
+  /// masing-masing satu block dgn header & baris TOTAL sendiri.
   /// Format presence-only: isi ✓ kalau hadir, kosong kalau tidak.
   /// Sumber: tab Absensi (kolom hadir = Y). Backward-compat: shift Pagi/Sore lama dihitung hadir.
   Future<void> pushAbsensiMatriks(String id) async {
     if (_api == null) return;
     final emps = await _activeEmployeeNames();
     final now = DateTime.now();
-    final year = now.year;
-    final month = now.month;
-    final daysInMonth = DateTime(year, month + 1, 0).day;
-    final ym = '$year-${month.toString().padLeft(2, '0')}';
+    final currYm = '${now.year}-${now.month.toString().padLeft(2, '0')}';
 
-    // Header: tgl | <Nama> | <Nama> | ...
-    final header = <Object?>['tgl'];
-    for (final name in emps) {
-      header.add(name);
-    }
-
-    final values = <List<Object?>>[header];
-    for (int d = 1; d <= daysInMonth; d++) {
-      final dateStr = '$ym-${d.toString().padLeft(2, '0')}';
-      final row = <Object?>[d];
-      for (final name in emps) {
-        // Hadir kalau: ada baris Y baru (hadir=Y) ATAU ada absen lama (shift Pagi/Sore).
-        // COUNTIFS gabungan: hadir=Y, atau shift Pagi, atau shift Sore, atau shift Hadir.
-        row.add(
-          '=IF(OR('
-          'COUNTIFS(Absensi!A:A,"$dateStr",Absensi!B:B,"$name",Absensi!C:C,"Y")>0,'
-          'COUNTIFS(Absensi!A:A,"$dateStr",Absensi!B:B,"$name",Absensi!C:C,"Hadir")>0,'
-          'COUNTIFS(Absensi!A:A,"$dateStr",Absensi!B:B,"$name",Absensi!C:C,"Pagi")>0,'
-          'COUNTIFS(Absensi!A:A,"$dateStr",Absensi!B:B,"$name",Absensi!C:C,"Sore")>0'
-          '),"✓","")',
-        );
+    // Kumpulkan semua bulan unik dari tab Absensi kolom A (YYYY-MM-DD).
+    final bulanSet = <String>{currYm};
+    try {
+      final res = await _api!.spreadsheets.values.get(id, "'Absensi'!A2:A");
+      for (final row in res.values ?? <List<Object?>>[]) {
+        if (row.isEmpty) continue;
+        final v = row[0].toString();
+        if (v.length >= 7) bulanSet.add(v.substring(0, 7));
       }
-      values.add(row);
+    } catch (e) {
+      debugPrint('Baca bulan absen gagal: $e');
     }
-    // Baris TOTAL hadir per karyawan (COUNTA kolom ✓).
-    final totalRow = <Object?>['TOTAL'];
-    final lastRow = daysInMonth + 1;
-    for (int i = 0; i < emps.length; i++) {
-      final col = _colLetter(1 + i); // karyawan ke-i mulai kolom B (index 1)
-      totalRow.add('=COUNTA(${col}2:${col}$lastRow)');
+    final bulans = bulanSet.toList()..sort();
+
+    final values = <List<Object?>>[];
+    final totalRows = <int>[]; // index baris TOTAL (buAT format bold)
+
+    for (final ym in bulans) {
+      final parts = ym.split('-');
+      final year = int.tryParse(parts[0]) ?? now.year;
+      final month = int.tryParse(parts[1]) ?? now.month;
+      final daysInMonth = DateTime(year, month + 1, 0).day;
+      final namaBulan = _namaBulan(month);
+
+      // Judul seksi bulan.
+      values.add(['📅 $namaBulan $year', '', '', '', '', '']);
+      values.add(['', '', '', '', '', '']);
+
+      // Header: tgl | <Nama> | <Nama> | ...
+      final header = <Object?>['tgl'];
+      for (final name in emps) {
+        header.add(name);
+      }
+      values.add(header);
+      final headerRowIdx = values.length; // 1-based
+
+      for (int d = 1; d <= daysInMonth; d++) {
+        final dateStr = '$ym-${d.toString().padLeft(2, '0')}';
+        final row = <Object?>[d];
+        for (final name in emps) {
+          row.add(
+            '=IF(OR('
+            'COUNTIFS(Absensi!A:A,"$dateStr",Absensi!B:B,"$name",Absensi!C:C,"Y")>0,'
+            'COUNTIFS(Absensi!A:A,"$dateStr",Absensi!B:B,"$name",Absensi!C:C,"Hadir")>0,'
+            'COUNTIFS(Absensi!A:A,"$dateStr",Absensi!B:B,"$name",Absensi!C:C,"Pagi")>0,'
+            'COUNTIFS(Absensi!A:A,"$dateStr",Absensi!B:B,"$name",Absensi!C:C,"Sore")>0'
+            '),"✓","")',
+          );
+        }
+        values.add(row);
+      }
+      // Baris TOTAL hadir per karyawan (COUNTA kolom ✓) — range dinamis per block.
+      final totalRow = <Object?>['TOTAL'];
+      final lastRowIdx = values.length; // 1-based, baris terakhir tgl
+      for (int i = 0; i < emps.length; i++) {
+        final col = _colLetter(1 + i);
+        totalRow.add('=COUNTA(${col}$headerRowIdx:${col}$lastRowIdx)');
+      }
+      values.add(totalRow);
+      totalRows.add(values.length); // 1-based index baris TOTAL
+
+      // Spasi antar bulan.
+      values.add(['', '', '', '', '', '']);
+      values.add(['', '', '', '', '', '']);
     }
-    values.add(totalRow);
 
     try {
       await _api!.spreadsheets.values.clear(
-          gs.ClearValuesRequest(), id, "'Absensi_Matriks'!A1:ZZ100");
+          gs.ClearValuesRequest(), id, "'Absensi_Matriks'!A1:ZZ500");
     } catch (_) {}
     await _api!.spreadsheets.values.update(
       gs.ValueRange(values: values),
@@ -941,14 +973,23 @@ class GoogleSheetService {
       valueInputOption: 'USER_ENTERED',
     );
 
-    // Format: freeze header + total row bold.
+    // Format: judul seksi + baris TOTAL bold, freeze baris atas, lebar kolom tgl.
     try {
       final sid = await _sheetId(id, 'Absensi_Matriks');
-      if (sid != null) await _formatAbsensiMatriks(id, sid, values.length, values.first.length);
+      if (sid != null) await _formatAbsensiMatriks(id, sid, values.length, values.first.length, totalRows);
     } catch (e) {
       debugPrint('Format Absensi_Matriks gagal: $e');
     }
-    debugPrint('🧮 Absensi_Matriks diperbarui: $daysInMonth hari × ${emps.length} karyawan.');
+    debugPrint('🧮 Absensi_Matriks diperbarui: ${bulans.length} bulan × ${emps.length} karyawan.');
+  }
+
+  /// Nama bulan Indonesia.
+  String _namaBulan(int m) {
+    const names = [
+      '', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+      'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+    ];
+    return (m >= 1 && m <= 12) ? names[m] : '';
   }
 
   /// Konversi index kolom (0-based) → huruf kolom Sheet (A, B, …, Z, AA, …).
@@ -1176,29 +1217,38 @@ class GoogleSheetService {
   }
 
   /// Pull absensi dari tab Absensi (Sheet) → SQLite, untuk bulan berjalan.
-  /// Owner bisa tandai hadir langsung di Sheet (kolom hadir = Y/N) → app ikut.
-  /// Return jumlah baris disinkronkan. Hanya isi 'Y' yang dicatat sebagai hadir.
+  /// Owner bisa tandai hadir langsung di Sheet (kolom hadir = Y) → app ikut.
+  /// AMAN & IDEMPOTEN: hanya menAMBAH hadir (recordAttendance upsert).
+  /// Baris 'N'/kosong di Sheet TIDAK menghapus absen app (anti corrupt: kalau Sheet
+  /// sengaja dikosongkan/ Salah edit, data absen app tetap aman). Pembatalan absen
+  /// dilakukan di app (yg akan hapus record lokal + diabaikan Sheet append-only).
   Future<int> pullAttendance(String id) async {
     if (_api == null) return 0;
-    // Ambil semua baris Absensi (A=hari_usaha, B=karyawan, C=hadir).
     final res = await _api!.spreadsheets.values.get(id, "'Absensi'!A2:C");
     final rows = res.values ?? [];
     final db = DbHelper();
+    // Cache nama karyawan valid (anti input salah di Sheet).
+    final knownEmps = <String>{};
+    for (final e in await db.getEmployees()) {
+      knownEmps.add((e['name'] ?? '').toString());
+    }
     int n = 0;
     for (final r in rows) {
       if (r.length < 3) continue;
-      final bDate = r[0].toString();
-      final name = r[1].toString();
+      final bDate = r[0].toString().trim();
+      final name = r[1].toString().trim();
       final hadirFlag = r[2].toString().trim().toUpperCase();
+      // Validasi: tanggal format YYYY-MM-DD & karyawan dikenal.
+      if (name.isEmpty || !knownEmps.contains(name)) continue;
+      if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(bDate)) continue;
       final bool hadir = hadirFlag == 'Y' || hadirFlag == 'TRUE' || hadirFlag == '1' || hadirFlag == '✓';
+      // Hanya catat HADIR. Tidak ada hapus otomatis (anti corrupt data app).
       if (hadir) {
         await db.recordAttendance(name, bDate, 'Hadir');
-      } else {
-        await db.removeAttendance(name, bDate, 'Hadir');
+        n++;
       }
-      n++;
     }
-    debugPrint('⬇️ Pull absensi dari Sheet: $n baris.');
+    debugPrint('⬇️ Pull absensi dari Sheet: $n baris hadir ditambahkan.');
     return n;
   }
 }
