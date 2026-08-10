@@ -545,7 +545,6 @@ class GoogleSheetService {
 
     // --- CHART 1: Bar omzet 7 hari terakhir (sumber: E1:F8 tabel mini) ---
     reqs.add(gs.Request(addChart: gs.AddChartRequest(chart: gs.EmbeddedChart(
-      chartId: 1001,
       position: gs.EmbeddedObjectPosition(
         overlayPosition: gs.OverlayPosition(
           anchorCell: gs.GridCoordinate(sheetId: sid, rowIndex: 0, columnIndex: 6),
@@ -585,7 +584,6 @@ class GoogleSheetService {
       debugPrint('Tabel metode gagal: $e');
     }
     reqs.add(gs.Request(addChart: gs.AddChartRequest(chart: gs.EmbeddedChart(
-      chartId: 1002,
       position: gs.EmbeddedObjectPosition(
         overlayPosition: gs.OverlayPosition(
           anchorCell: gs.GridCoordinate(sheetId: sid, rowIndex: 12, columnIndex: 6),
@@ -621,7 +619,6 @@ class GoogleSheetService {
       debugPrint('Tabel jam sibuk gagal: $e');
     }
     reqs.add(gs.Request(addChart: gs.AddChartRequest(chart: gs.EmbeddedChart(
-      chartId: 1003,
       position: gs.EmbeddedObjectPosition(
         overlayPosition: gs.OverlayPosition(
           anchorCell: gs.GridCoordinate(sheetId: sid, rowIndex: 24, columnIndex: 6),
@@ -644,6 +641,7 @@ class GoogleSheetService {
         ),
       ),
     ))));
+
 
     if (reqs.isNotEmpty) {
       await _api!.spreadsheets.batchUpdate(

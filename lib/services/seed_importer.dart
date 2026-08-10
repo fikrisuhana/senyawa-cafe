@@ -16,12 +16,16 @@ class SeedImporter {
   static Future<bool> importSeederIfNeeded() async {
     final db = await DbHelper().database;
 
-    // Cek apakah seeder sudah pernah di-import
+    // Cek apakah seeder sudah pernah di-import dan data menu benar-benar ada
     final check = await db.query('settings', where: 'key = ?', whereArgs: ['seeder_imported']);
     if (check.isNotEmpty && check.first['value'] == 'true') {
-      debugPrint('⚡ Seeder database sudah pernah di-import.');
-      return false;
+      final count = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM menu_items')) ?? 0;
+      if (count > 0) {
+        debugPrint('⚡ Seeder database sudah pernah di-import ($count menu).');
+        return false;
+      }
     }
+
 
     try {
       debugPrint('📦 Membaca assets/seed/seed.raw.json...');
@@ -50,10 +54,11 @@ class SeedImporter {
               'price': item['price'] ?? 0,
               'cost': item['cost'] ?? 0,
               'active': (item['active'] == true) ? 1 : 0,
-              'sortOrder': item['urutan'] ?? item['sortOrder'] ?? 0,
+              'sort_order': item['urutan'] ?? item['sort_order'] ?? item['sortOrder'] ?? 0,
             }, conflictAlgorithm: ConflictAlgorithm.replace);
           }
         }
+
 
         // 3. Import VariantGroup (ignore kalau sudah ada — idempoten)
         if (data['varianGrup'] != null) {
