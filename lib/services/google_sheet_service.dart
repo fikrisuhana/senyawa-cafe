@@ -347,19 +347,25 @@ class GoogleSheetService {
 
   /// Tulis DASHBOARD ringkasan owner — board KPI bersekat + rumus LIVE + format
   /// (currency/persen/warna). Kolom Transaksi: B hari_usaha, D kasir, E tipe,
-  /// F metode, H diskon, J total, K status. Kas: A hari_usaha, B tipe, C nominal.
+  /// Tulis DASHBOARD ringkasan owner — board KPI dengan FILTER DROPDOWN INTERAKTIF
+  /// (Hari Ini, Kemarin, 7 Hari Terakhir, Bulan Ini, Bulan Lalu, 3 Bulan, Sepanjang Waktu).
+  /// Semua formula otomatis live mengikuti pilihan di sel B3 tanpa perlu reload!
   Future<void> pushDashboard(String id) async {
     if (_api == null) return;
-    const h = 'TEXT(TODAY(),"yyyy-mm-dd")';           // hari ini (teks)
-    const b = 'TEXT(TODAY(),"yyyy-mm")&"*"';          // prefix bulan, mis "2026-07*"
-    const omzetH = 'SUMIFS(Transaksi!J:J,Transaksi!B:B,$h,Transaksi!K:K,"ACTIVE")';
-    const trxH = 'COUNTIFS(Transaksi!B:B,$h,Transaksi!K:K,"ACTIVE")';
-    String metode(String m) => 'SUMIFS(Transaksi!J:J,Transaksi!B:B,$h,Transaksi!F:F,"$m",Transaksi!K:K,"ACTIVE")';
-    String tipeVal(String tp) => 'SUMIFS(Transaksi!J:J,Transaksi!B:B,$h,Transaksi!E:E,"$tp",Transaksi!K:K,"ACTIVE")';
-    String tipeCnt(String tp) => 'COUNTIFS(Transaksi!B:B,$h,Transaksi!E:E,"$tp",Transaksi!K:K,"ACTIVE")';
-    const omzetB = 'SUMIFS(Transaksi!J:J,Transaksi!B:B,$b,Transaksi!K:K,"ACTIVE")';
-    const trxB = 'COUNTIFS(Transaksi!B:B,$b,Transaksi!K:K,"ACTIVE")';
 
+    // Sel referensi filter:
+    // B3: Dropdown Pilihan Periode
+    // C4: Tanggal Awal (string YYYY-MM-DD hasil formula)
+    // B5: Tanggal Akhir (string YYYY-MM-DD hasil formula)
+    const tAwal = r'$C$4';
+    const tAkhir = r'$B$5';
+
+    // Formula dinamis berdasarkan rentang tanggal terpilih
+    const omzetFilter = 'SUMIFS(Transaksi!J:J,Transaksi!B:B,">="&$tAwal,Transaksi!B:B,"<="&$tAkhir,Transaksi!K:K,"ACTIVE")';
+    const trxFilter = 'COUNTIFS(Transaksi!B:B,">="&$tAwal,Transaksi!B:B,"<="&$tAkhir,Transaksi!K:K,"ACTIVE")';
+    String metode(String m) => 'SUMIFS(Transaksi!J:J,Transaksi!B:B,">="&$tAwal,Transaksi!B:B,"<="&$tAkhir,Transaksi!F:F,"$m",Transaksi!K:K,"ACTIVE")';
+    String tipeVal(String tp) => 'SUMIFS(Transaksi!J:J,Transaksi!B:B,">="&$tAwal,Transaksi!B:B,"<="&$tAkhir,Transaksi!E:E,"$tp",Transaksi!K:K,"ACTIVE")';
+    String tipeCnt(String tp) => 'COUNTIFS(Transaksi!B:B,">="&$tAwal,Transaksi!B:B,"<="&$tAkhir,Transaksi!E:E,"$tp",Transaksi!K:K,"ACTIVE")';
 
     // Susun baris + tandai jenis format tiap sel.
     final values = <List<Object?>>[];
@@ -381,91 +387,95 @@ class GoogleSheetService {
     }
 
     title('📊 RUANG SENYAWA — DASHBOARD POS');
-    sub('Terisi otomatis dari tab Transaksi · Kas · Absensi. Jangan diedit manual.');
+    sub('Filter interaktif: Pilih periode pada dropdown B3 di bawah (laporan otomatis hitung live):');
+    
+    // Baris 3: Dropdown Selector
+    values.add(['🔍 PILIH PERIODE LAPORAN:', 'Hari Ini', r'="[ Rentang: "&$C$4&" s/d "&$B$5&" ]"']); r++;
+
+    // Baris 4: Tanggal Awal formula
+    values.add([
+      '📅 Tgl Awal Filter (auto):',
+      'Tanggal Awal:',
+      '=IF(B3="Hari Ini",TEXT(TODAY(),"yyyy-mm-dd"),IF(B3="Kemarin",TEXT(TODAY()-1,"yyyy-mm-dd"),IF(B3="7 Hari Terakhir",TEXT(TODAY()-6,"yyyy-mm-dd"),IF(B3="30 Hari Terakhir",TEXT(TODAY()-29,"yyyy-mm-dd"),IF(B3="Bulan Ini",TEXT(DATE(YEAR(TODAY()),MONTH(TODAY()),1),"yyyy-mm-dd"),IF(B3="Bulan Lalu",TEXT(EDATE(DATE(YEAR(TODAY()),MONTH(TODAY()),1),-1),"yyyy-mm-dd"),IF(B3="3 Bulan Terakhir",TEXT(EDATE(TODAY(),-3),"yyyy-mm-dd"),"2020-01-01")))))))',
+    ]); r++;
+    // Baris 5: Tanggal Akhir formula
+    values.add([
+      '📅 Tgl Akhir Filter (auto):',
+      '=IF(B3="Kemarin",TEXT(TODAY()-1,"yyyy-mm-dd"),IF(B3="Bulan Lalu",TEXT(DATE(YEAR(TODAY()),MONTH(TODAY()),1)-1,"yyyy-mm-dd"),TEXT(TODAY(),"yyyy-mm-dd")))',
+      'Rumus otomatis aktif ✓',
+    ]); r++;
     gap();
 
-    sec('▌ RINGKASAN HARI INI');
-    kv('Omzet hari ini', omzetH, note: 'penjualan ACTIVE');
-    kv('Jumlah transaksi', trxH, bfmt: 'int');
-    kv('Rata-rata / transaksi', 'IFERROR($omzetH/$trxH,0)');
-    kv('Diskon diberikan', 'SUMIFS(Transaksi!H:H,Transaksi!B:B,$h,Transaksi!K:K,"ACTIVE")', note: 'potongan voucher');
+    sec('▌ RINGKASAN PERIODE TERPILIH');
+    kv('Omzet Penjualan', omzetFilter, note: 'penjualan ACTIVE');
+    kv('Jumlah Transaksi', trxFilter, bfmt: 'int');
+    kv('Rata-rata / Transaksi', 'IFERROR($omzetFilter/$trxFilter,0)');
+    kv('Diskon Diberikan', 'SUMIFS(Transaksi!H:H,Transaksi!B:B,">="&$tAwal,Transaksi!B:B,"<="&$tAkhir,Transaksi!K:K,"ACTIVE")', note: 'potongan voucher');
     gap();
 
-    sec('▌ METODE PEMBAYARAN — HARI INI');
-    kv('Tunai (CASH)', metode('CASH'), cFormula: 'IFERROR(${metode('CASH')}/$omzetH,0)', cfmt: 'pct');
-    kv('QRIS', metode('QRIS'), cFormula: 'IFERROR(${metode('QRIS')}/$omzetH,0)', cfmt: 'pct');
-    kv('Transfer', metode('TRANSFER'), cFormula: 'IFERROR(${metode('TRANSFER')}/$omzetH,0)', cfmt: 'pct');
+    sec('▌ METODE PEMBAYARAN (PERIODE TERPILIH)');
+    kv('Tunai (CASH)', metode('CASH'), cFormula: 'IFERROR(${metode('CASH')}/$omzetFilter,0)', cfmt: 'pct');
+    kv('QRIS', metode('QRIS'), cFormula: 'IFERROR(${metode('QRIS')}/$omzetFilter,0)', cfmt: 'pct');
+    kv('Transfer Bank', metode('TRANSFER'), cFormula: 'IFERROR(${metode('TRANSFER')}/$omzetFilter,0)', cfmt: 'pct');
     gap();
 
-    sec('▌ KAS & UANG LACI — HARI INI');
-    kv('Kas masuk', 'SUMIFS(Kas!C:C,Kas!A:A,$h,Kas!B:B,"MASUK")', note: 'kas awal + pemasukan');
-    kv('Pengeluaran', 'SUMIFS(Kas!C:C,Kas!A:A,$h,Kas!B:B,"KELUAR")');
-    kv('Uang di laci (estimasi)', '${metode('CASH')}+SUMIFS(Kas!C:C,Kas!A:A,$h,Kas!B:B,"MASUK")-SUMIFS(Kas!C:C,Kas!A:A,$h,Kas!B:B,"KELUAR")', note: 'tunai + masuk − keluar');
+    sec('▌ KAS & UANG LACI (PERIODE TERPILIH)');
+    kv('Kas Masuk', 'SUMIFS(Kas!C:C,Kas!A:A,">="&$tAwal,Kas!A:A,"<="&$tAkhir,Kas!B:B,"MASUK")', note: 'kas awal + pemasukan');
+    kv('Pengeluaran Kas', 'SUMIFS(Kas!C:C,Kas!A:A,">="&$tAwal,Kas!A:A,"<="&$tAkhir,Kas!B:B,"KELUAR")');
+    kv('Estimasi Arus Kas Bersih', '${metode('CASH')}+SUMIFS(Kas!C:C,Kas!A:A,">="&$tAwal,Kas!A:A,"<="&$tAkhir,Kas!B:B,"MASUK")-SUMIFS(Kas!C:C,Kas!A:A,">="&$tAwal,Kas!A:A,"<="&$tAkhir,Kas!B:B,"KELUAR")', note: 'tunai + masuk − keluar');
     gap();
 
-    sec('▌ TIPE PESANAN — HARI INI');
+    sec('▌ TIPE PESANAN (PERIODE TERPILIH)');
     kv('Makan di tempat', tipeVal('DINE_IN'), cFormula: '${tipeCnt('DINE_IN')}&" transaksi"', cfmt: '');
-    kv('Bungkus', tipeVal('TAKEAWAY'), cFormula: '${tipeCnt('TAKEAWAY')}&" transaksi"', cfmt: '');
+    kv('Bungkus (Takeaway)', tipeVal('TAKEAWAY'), cFormula: '${tipeCnt('TAKEAWAY')}&" transaksi"', cfmt: '');
     gap();
 
     // Kinerja kasir — dinamis dari daftar karyawan aktif.
     final emps = await _activeEmployeeNames();
     if (emps.isNotEmpty) {
-      sec('▌ KINERJA KASIR — HARI INI');
+      sec('▌ KINERJA KASIR (PERIODE TERPILIH)');
       for (final name in emps) {
         final safe = name.replaceAll('"', '');
-        kv('   $safe', 'SUMIFS(Transaksi!J:J,Transaksi!B:B,$h,Transaksi!D:D,"$safe",Transaksi!K:K,"ACTIVE")',
-            cFormula: 'COUNTIFS(Transaksi!B:B,$h,Transaksi!D:D,"$safe",Transaksi!K:K,"ACTIVE")&" trx"');
+        kv('   $safe', 'SUMIFS(Transaksi!J:J,Transaksi!B:B,">="&$tAwal,Transaksi!B:B,"<="&$tAkhir,Transaksi!D:D,"$safe",Transaksi!K:K,"ACTIVE")',
+            cFormula: 'COUNTIFS(Transaksi!B:B,">="&$tAwal,Transaksi!B:B,"<="&$tAkhir,Transaksi!D:D,"$safe",Transaksi!K:K,"ACTIVE")&" trx"');
       }
       gap();
     }
 
-    sec('▌ BULAN INI');
-    kv('Omzet bulan ini', omzetB, note: 'bulan berjalan');
-    kv('Transaksi bulan ini', trxB, bfmt: 'int');
-    kv('Rata-rata / transaksi', 'IFERROR($omzetB/$trxB,0)');
+    sec('▌ SEPANJANG WAKTU (TOTAL HISTORIS)');
+    kv('Total Omzet (ACTIVE)', 'SUMIF(Transaksi!K:K,"ACTIVE",Transaksi!J:J)');
+    kv('Total Transaksi Tercatat', 'COUNTA(Transaksi!A2:A)', bfmt: 'int');
+    kv('Transaksi Dibatalkan (VOID)', 'COUNTIF(Transaksi!K:K,"VOID")', bfmt: 'int');
+    kv('Tingkat Pembatalan', 'IFERROR(COUNTIF(Transaksi!K:K,"VOID")/COUNTA(Transaksi!A2:A),0)', bfmt: 'pct');
     gap();
 
-    sec('▌ SEPANJANG WAKTU');
-    kv('Total omzet (ACTIVE)', 'SUMIF(Transaksi!K:K,"ACTIVE",Transaksi!J:J)');
-    kv('Total transaksi tercatat', 'COUNTA(Transaksi!A2:A)', bfmt: 'int');
-    kv('Transaksi dibatalkan (VOID)', 'COUNTIF(Transaksi!K:K,"VOID")', bfmt: 'int');
-    kv('Tingkat pembatalan', 'IFERROR(COUNTIF(Transaksi!K:K,"VOID")/COUNTA(Transaksi!A2:A),0)', bfmt: 'pct');
-    gap();
-
-    // TOP 5 MENU HARI INI — dari tab Transaksi_Item (menu + qty) join kode hari ini.
-    sec('▌ TOP 5 MENU — HARI INI');
-    // QUERY langsung return 5 baris (menu, total qty) utk trx yg kodenya diawali prefix hari ini.
-    // Ditulis di 1 sel; Sheet akan tumpah ke bawah (array formula).
-    const kodePrefixHari = 'TRX-TEXT(TODAY(),"yyyyMMdd")';
+    // TOP 5 MENU TERLARIS
+    sec('▌ TOP 5 MENU TERLARIS (SEMUA WAKTU)');
     kv('Lihat 5 terlaris di bawah ↓',
-
-      'IFERROR(QUERY(Transaksi_Item!A2:F,"SELECT B, SUM(D) WHERE A STARTS WITH \'$kodePrefixHari\' GROUP BY B LABEL SUM(D) \'Qty\' ORDER BY SUM(D) DESC LIMIT 5",0),"belum ada data")',
-      bfmt: 'int', note: 'menu + total qty terjual hari ini');
+      'IFERROR(QUERY(Transaksi_Item!A2:F,"SELECT B, SUM(D) WHERE A STARTS WITH \'TRX-\' GROUP BY B LABEL SUM(D) \'Qty\' ORDER BY SUM(D) DESC LIMIT 5",0),"belum ada data")',
+      bfmt: 'int', note: 'menu + total qty terjual');
     gap();
 
-    // JAM SIBUK HARI INI — omzet per jam (07-23). Dipakai juga buat chart bar.
-    sec('▌ JAM SIBUK — HARI INI (omzet per jam)');
+    // JAM SIBUK — omzet per jam (07-23) untuk periode terpilih.
+    sec('▌ JAM SIBUK (PERIODE TERPILIH)');
     for (int jam = 7; jam <= 23; jam++) {
       final jamStr = jam.toString().padLeft(2, '0');
       kv('$jamStr:00 - ${((jam + 1) % 24).toString().padLeft(2, '0')}:00',
-        'SUMPRODUCT((TEXT(Transaksi!C2:C,"yyyy-mm-dd")=$h)*(HOUR(Transaksi!C2:C)=$jam)*(Transaksi!K2:K="ACTIVE")*Transaksi!J2:J)',
+        'SUMPRODUCT((Transaksi!B2:B>=$tAwal)*(Transaksi!B2:B<=$tAkhir)*(HOUR(Transaksi!C2:C)=$jam)*(Transaksi!K2:K="ACTIVE")*Transaksi!J2:J)',
         bfmt: 'rp', note: '');
     }
     gap();
 
-    // AUDIT VOID — tracking transaksi dibatalkan hari ini & bulan ini.
-    sec('▌ AUDIT VOID — TRANSAKSI DIBATALKAN');
-    kv('Jumlah VOID hari ini', 'COUNTIFS(Transaksi!B:B,$h,Transaksi!K:K,"VOID")', bfmt: 'int');
-    kv('Nilai VOID hari ini', 'SUMIFS(Transaksi!J:J,Transaksi!B:B,$h,Transaksi!K:K,"VOID")', note: 'estimasi nilai');
-    kv('Jumlah VOID bulan ini', 'COUNTIFS(Transaksi!B:B,$b,Transaksi!K:K,"VOID")', bfmt: 'int');
-    kv('Nilai VOID bulan ini', 'SUMIFS(Transaksi!J:J,Transaksi!B:B,$b,Transaksi!K:K,"VOID")');
+    // AUDIT VOID
+    sec('▌ AUDIT VOID (PERIODE TERPILIH)');
+    kv('Jumlah VOID', 'COUNTIFS(Transaksi!B:B,">="&$tAwal,Transaksi!B:B,"<="&$tAkhir,Transaksi!K:K,"VOID")', bfmt: 'int');
+    kv('Nilai VOID', 'SUMIFS(Transaksi!J:J,Transaksi!B:B,">="&$tAwal,Transaksi!B:B,"<="&$tAkhir,Transaksi!K:K,"VOID")', note: 'estimasi nilai');
     gap();
 
-    sec('▌ KATALOG & STAF');
-    kv('Menu aktif', 'COUNTIF(Menu_Resep!E2:E,1)', bfmt: 'int', note: 'aktif = 1');
-    kv('Voucher aktif', 'COUNTIF(Voucher!D2:D,1)', bfmt: 'int');
-    kv('Karyawan hadir hari ini', 'COUNTIF(Absensi!A2:A,$h)', bfmt: 'int', note: 'dari tab Absensi');
+    sec('▌ KATALOG & MASTER DATA');
+    kv('Menu Aktif', 'COUNTIF(Menu_Resep!E2:E,1)', bfmt: 'int', note: 'aktif = 1');
+    kv('Voucher Aktif', 'COUNTIF(Voucher!D2:D,1)', bfmt: 'int');
+    kv('Kehadiran Staf (Periode Terpilih)', 'COUNTIFS(Absensi!A:A,">="&$tAwal,Absensi!A:A,"<="&$tAkhir)', bfmt: 'int', note: 'dari tab Absensi');
 
     // Tabel mini di kolom E-G untuk chart: 7 hari terakhir (tanggal × omzet).
     final values7d = <List<Object?>>[];
@@ -479,7 +489,7 @@ class GoogleSheetService {
 
     // Bersihkan lalu tulis nilai.
     try {
-      await _api!.spreadsheets.values.clear(gs.ClearValuesRequest(), id, "'Dashboard'!A1:C200");
+      await _api!.spreadsheets.values.clear(gs.ClearValuesRequest(), id, "'Dashboard'!A1:C250");
     } catch (_) {}
     await _api!.spreadsheets.values.update(
       gs.ValueRange(values: values), id, "'Dashboard'!A1", valueInputOption: 'USER_ENTERED');
@@ -497,14 +507,14 @@ class GoogleSheetService {
       debugPrint('Tabel 7 hari gagal: $e');
     }
 
-    // Format biar josjis (judul, seksi, currency, persen, lebar kolom).
+    // Format biar josjis (judul, seksi, dropdown B3, currency, persen, lebar kolom).
     try {
       final sid = await _sheetId(id, 'Dashboard');
       if (sid != null) await _formatDashboard(id, sid, values.length, sectionRows, rpRows, pctB, pctC);
     } catch (e) {
       debugPrint('Format dashboard gagal: $e');
     }
-    debugPrint('📊 Dashboard diperbarui (josjis, rumus live).');
+    debugPrint('📊 Dashboard diperbarui (interaktif filter dropdown, rumus live).');
 
     // Tambah chart native (bar/pie) — idempotent: hapus chart lama dulu.
     try {
@@ -513,6 +523,7 @@ class GoogleSheetService {
       debugPrint('Chart dashboard gagal: $e');
     }
   }
+
 
   /// Tambah 3 chart native di tab Dashboard: (1) bar omzet 7 hari,
   /// (2) pie metode pembayaran hari ini, (3) bar jam sibuk.
@@ -770,13 +781,62 @@ class GoogleSheetService {
       )));
     }
 
+    // Data Validation Dropdown di B3 (Pilihan Periode Filter)
+    reqs.add(gs.Request(
+      setDataValidation: gs.SetDataValidationRequest(
+        range: range(2, 3, 1, 2), // Sel B3 (row index 2, col index 1)
+        rule: gs.DataValidationRule(
+          condition: gs.BooleanCondition(
+            type: 'ONE_OF_LIST',
+            values: [
+              gs.ConditionValue(userEnteredValue: 'Hari Ini'),
+              gs.ConditionValue(userEnteredValue: 'Kemarin'),
+              gs.ConditionValue(userEnteredValue: '7 Hari Terakhir'),
+              gs.ConditionValue(userEnteredValue: '30 Hari Terakhir'),
+              gs.ConditionValue(userEnteredValue: 'Bulan Ini'),
+              gs.ConditionValue(userEnteredValue: 'Bulan Lalu'),
+              gs.ConditionValue(userEnteredValue: '3 Bulan Terakhir'),
+              gs.ConditionValue(userEnteredValue: 'Sepanjang Waktu'),
+            ],
+          ),
+          showCustomUi: true,
+          strict: false,
+        ),
+      ),
+    ));
+
+    // Styling Khusus Dropdown B3 (tombol filter hijau lembut)
+    reqs.add(gs.Request(repeatCell: gs.RepeatCellRequest(
+      range: range(2, 3, 1, 2),
+      cell: gs.CellData(userEnteredFormat: gs.CellFormat(
+        backgroundColor: _rgb(0xE6F4EA),
+        horizontalAlignment: 'CENTER',
+        textFormat: gs.TextFormat(bold: true, fontSize: 11, foregroundColor: _rgb(0x137333)))),
+      fields: 'userEnteredFormat(backgroundColor,horizontalAlignment,textFormat)',
+    )));
+
+    // Styling Baris Filter A3:C5 (banner abu-abu rapi)
+    reqs.add(gs.Request(repeatCell: gs.RepeatCellRequest(
+      range: range(2, 3, 0, 1), // A3
+      cell: gs.CellData(userEnteredFormat: gs.CellFormat(
+        textFormat: gs.TextFormat(bold: true, fontSize: 11, foregroundColor: _rgb(0x3B2A20)))),
+      fields: 'userEnteredFormat.textFormat',
+    )));
+    reqs.add(gs.Request(repeatCell: gs.RepeatCellRequest(
+      range: range(3, 5, 0, 3), // A4:C5 info formula tgl
+      cell: gs.CellData(userEnteredFormat: gs.CellFormat(
+        backgroundColor: _rgb(0xF8F9FA),
+        textFormat: gs.TextFormat(italic: true, fontSize: 9, foregroundColor: _rgb(0x5F6368)))),
+      fields: 'userEnteredFormat(backgroundColor,textFormat)',
+    )));
+
     // Lebar kolom A/B/C.
     void colW(int col, int px) => reqs.add(gs.Request(updateDimensionProperties: gs.UpdateDimensionPropertiesRequest(
           range: gs.DimensionRange(sheetId: sid, dimension: 'COLUMNS', startIndex: col, endIndex: col + 1),
           properties: gs.DimensionProperties(pixelSize: px),
           fields: 'pixelSize',
         )));
-    colW(0, 230); colW(1, 140); colW(2, 230);
+    colW(0, 240); colW(1, 150); colW(2, 240);
 
     // Freeze 2 baris atas.
     reqs.add(gs.Request(updateSheetProperties: gs.UpdateSheetPropertiesRequest(
@@ -786,6 +846,7 @@ class GoogleSheetService {
 
     await _api!.spreadsheets.batchUpdate(gs.BatchUpdateSpreadsheetRequest(requests: reqs), id);
   }
+
 
   /// Tulis tab Rekap_Bulanan: 1 baris per bulan (auto-grow dari data Transaksi).
   /// Tiap baris berisi rumus SUMIFS/COUNTIFS ke tab Transaksi & Kas bulan tsb.
