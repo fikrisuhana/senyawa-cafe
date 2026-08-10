@@ -19,6 +19,7 @@ class RecapScreen extends StatefulWidget {
 class _RecapScreenState extends State<RecapScreen> {
   Map<String, dynamic>? _summary;
   List<Map<String, dynamic>> _cashEntries = [];
+  List<Map<String, dynamic>> _itemSales = [];
   List<TransactionModel> _todayTransactions = [];
   bool _isLoading = true;
 
@@ -36,12 +37,14 @@ class _RecapScreenState extends State<RecapScreen> {
 
     final summary = await DbHelper().getTodaySummary(bDateKey);
     final entries = await DbHelper().getCashEntries(bDateKey);
+    final itemSales = await DbHelper().getTodayItemSales(bDateKey);
     final trxs = await DbHelper().getTodayTransactions(bDateKey);
 
     if (mounted) {
       setState(() {
         _summary = summary;
         _cashEntries = entries;
+        _itemSales = itemSales;
         _todayTransactions = trxs;
         _isLoading = false;
       });
@@ -180,9 +183,10 @@ class _RecapScreenState extends State<RecapScreen> {
                   separatorBuilder: (_, __) => const Divider(height: 1),
                   itemBuilder: (context, index) {
                     final entry = _cashEntries[index];
-                    final bool isOut = entry['type'] == 'OUT';
-                    final amount = entry['amount'] as int;
-                    final category = entry['category'] as String;
+                    // Fix: tipe kas sekarang pakai konstanta MASUK/KELUAR (bukan IN/OUT lama).
+                    final bool isOut = entry['type'] == CashType.out || entry['type'] == 'OUT';
+                    final amount = toInt(entry['amount']);
+                    final category = (entry['category'] ?? '').toString();
                     final note = (entry['note'] as String?) ?? '';
                     final created = (entry['created_at'] as String?) ?? '';
                     final timeStr = created.length >= 16 ? created.substring(11, 16) : '';
@@ -211,6 +215,43 @@ class _RecapScreenState extends State<RecapScreen> {
                           color: isOut ? Colors.red : const Color(0xFF006C4C),
                         ),
                       ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 18),
+            ],
+
+            // Rincian Item Terjual Hari Ini (pivot qty per menu)
+            if (_itemSales.isNotEmpty) ...[
+              const Text('☕ Item Terjual Hari Ini', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const SizedBox(height: 8),
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFE8DFD8)),
+                ),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _itemSales.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final it = _itemSales[index];
+                    final menu = (it['menu'] ?? '').toString();
+                    final qty = toInt(it['total_qty']);
+                    final omzet = toInt(it['total_omzet']);
+                    return ListTile(
+                      dense: true,
+                      leading: CircleAvatar(
+                        radius: 14,
+                        backgroundColor: const Color(0xFFE8F0FE),
+                        child: Text('${index + 1}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1A73E8))),
+                      ),
+                      title: Text(menu, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      subtitle: Text('$qty porsi terjual', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                      trailing: Text(currencyFormatter.format(omzet), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF356A58))),
                     );
                   },
                 ),

@@ -50,6 +50,7 @@ class GoogleSheetService {
     'Restok_Log': ['waktu', 'nama_bahan', 'jumlah_tambah', 'satuan', 'stok_akhir'],
     'Absensi': ['hari_usaha', 'karyawan', 'hadir', 'waktu'],
     'Karyawan': ['nama', 'aktif', 'shift_status'],
+    'Menu_Terlaris': ['menu', 'total_qty', 'total_omzet', 'qty_bulan_ini', 'omzet_bulan_ini'],
   };
 
   bool get isConnected => _account != null && _api != null;
@@ -342,6 +343,11 @@ class GoogleSheetService {
       await pushAbsensiMatriks(id);
     } catch (e) {
       debugPrint('Absensi matriks gagal: $e');
+    }
+    try {
+      await pushMenuTerlaris(id);
+    } catch (e) {
+      debugPrint('Menu terlaris gagal: $e');
     }
   }
 
@@ -1250,6 +1256,120 @@ class GoogleSheetService {
       gs.ValueRange(values: rows), id, "'Karyawan'!A1", valueInputOption: 'RAW',
     );
     debugPrint('👥 Karyawan terkirim ke Sheet: ${emps.length} orang.');
+  }
+
+  /// Tulis tab Menu_Terlaris: pivot qty & omzet per menu (sepanjang waktu + bulan ini).
+  /// Sumber: tab Transaksi_Item (B=menu, D=qty, F=subtotal). Kode transaksi
+  /// berformat TRX-YYYYMMDD-... jadi filter bulan via prefix "TRX-YYYYMM".
+  Future<void> pushMenuTerlaris(String id) async {
+    if (_api == null) return;
+    final now = DateTime.now();
+    final ym = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+    final prefixBulan = 'TRX-${ym.replaceAll('-', '')}'; // "TRX-202608"
+
+    final header = _tabs['Menu_Terlaris']!;
+    // QUERY 1: total qty & omzet per menu (sepanjang waktu), order by qty desc.
+    // QUERY 2: qty & omzet bulan ini (filter kode diawali prefix bulan).
+    final values = <List<Object?>>[header];
+    // Tambah 1 baris QUERY array yg men-spill ke bawah: menu, sum(qty), sum(subtotal).
+    values.add([
+      '=IFERROR(QUERY(Transaksi_Item!B2:F,"SELECT B, SUM(D), SUM(F) WHERE B IS NOT NULL GROUP BY B LABEL SUM(D) \'\', SUM(F) \'\' ORDER BY SUM(D) DESC",0),"")',
+      '', '', '', '',
+    ]);
+    // Tabel kedua di kolom E-G: top menu bulan ini.
+    final bulanHeader = <Object?>[
+      '=CONCATENATE("Top Menu Bulan ",TEXT(TODAY(),"MMMM yyyy"))',
+      '', '',
+    ];
+    // Tulis header bulan di kolom E-G baris 1 (sejajar header utama).
+    // Karena update Values tulis per range, kita tulis header utama dulu (di atas),
+    // lalu tabel bulan terpisah di H1.
+
+    // Tulis ulang: gunakan struktur 2 area. Area 1 (A:D) total sepanjang waktu,
+    // Area 2 (F:I) bulan ini.
+    final mainValues = <List<Object?>>[
+      header,
+      [
+        '=IFERROR(QUERY(Transaksi_Item!B2:F,"SELECT B, SUM(D), SUM(F) WHERE B IS NOT NULL GROUP BY B LABEL SUM(D) \'\', SUM(F) \'\' ORDER BY SUM(D) DESC",0),"")',
+        '', '', '',
+      ],
+    ];
+
+    // Clear dulu area luas.
+    try {
+      await _api!.spreadsheets.values.clear(gs.ClearValuesRequest(), id, "'Menu_Terlaris'!A1:Z500");
+    } catch (_) {}
+    await _api!.spreadsheets.values.update(
+      gs.ValueRange(values: mainValues),
+      id, "'Menu_Terlaris'!A1",
+      valueInputOption: 'USER_ENTERED',
+    );
+
+    // Tulis area bulan ini di kolom F1.
+    final bulanValues = <List<Object?>>[
+      ['Menu (Bulan $ym)', 'Qty', 'Omzet'],
+      [
+        '=IFERROR(QUERY(Transaksi_Item!A2:F,"SELECT B, SUM(D), SUM(F) WHERE A STARTS WITH \'$prefixBulan\' GROUP BY B LABEL SUM(D) \'\', SUM(F) \'\' ORDER BY SUM(D) DESC",0),"")',
+        '', '',
+      ],
+    ];
+    try {
+      await _api!.spreadsheets.values.update(
+        gs.ValueRange(values: bulanValues),
+        id, "'Menu_Terlaris'!F1",
+        valueInputOption: 'USER_ENTERED',
+      );
+    } catch (e) {
+      debugPrint('Tabel bulan ini gagal: $e');
+    }
+
+    // Format currency kolom C (omzet total) & I (omzet bulan), freeze header.
+    try {
+      final sid = await _sheetId(id, 'Menu_Terlaris');
+      if (sid != null) await _formatMenuTerlaris(id, sid);
+    } catch (e) {
+      debugPrint('Format Menu_Terlaris gagal: $e');
+    }
+    debugPrint('🏆 Menu_Terlaris diperbarui.');
+    // Suppress unused.
+    // ignore: unused_local_variable
+    final _ = bulanHeader;
+  }
+
+  /// Format tab Menu_Terlaris: header bold, currency kolom C & I.
+  Future<void> _formatMenuTerlaris(String id, int sid) async {
+    final reqs = <gs.Request>[];
+    // Header utama (A1:D1) bold + coklat.
+    reqs.add(gs.Request(repeatCell: gs.RepeatCellRequest(
+      range: gs.GridRange(sheetId: sid, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 4),
+      cell: gs.CellData(userEnteredFormat: gs.CellFormat(
+          backgroundColor: _rgb(0x7A5540),
+          textFormat: gs.TextFormat(bold: true, foregroundColor: _rgb(0xFFFFFF)))),
+      fields: 'userEnteredFormat(backgroundColor,textFormat)',
+    )));
+    // Header bulan (F1:H1) bold + hijau.
+    reqs.add(gs.Request(repeatCell: gs.RepeatCellRequest(
+      range: gs.GridRange(sheetId: sid, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 5, endColumnIndex: 8),
+      cell: gs.CellData(userEnteredFormat: gs.CellFormat(
+          backgroundColor: _rgb(0x356A58),
+          textFormat: gs.TextFormat(bold: true, foregroundColor: _rgb(0xFFFFFF)))),
+      fields: 'userEnteredFormat(backgroundColor,textFormat)',
+    )));
+    // Currency omzet kolom C (index 2) & H (index 7).
+    for (final c in [2, 7]) {
+      reqs.add(gs.Request(repeatCell: gs.RepeatCellRequest(
+        range: gs.GridRange(sheetId: sid, startRowIndex: 1, startColumnIndex: c, endColumnIndex: c + 1),
+        cell: gs.CellData(userEnteredFormat: gs.CellFormat(
+            numberFormat: gs.NumberFormat(type: 'CURRENCY', pattern: '"Rp"#,##0'))),
+        fields: 'userEnteredFormat.numberFormat',
+      )));
+    }
+    // Freeze header.
+    reqs.add(gs.Request(updateSheetProperties: gs.UpdateSheetPropertiesRequest(
+      properties: gs.SheetProperties(sheetId: sid, gridProperties: gs.GridProperties(frozenRowCount: 1)),
+      fields: 'gridProperties.frozenRowCount',
+    )));
+    await _api!.spreadsheets.batchUpdate(gs.BatchUpdateSpreadsheetRequest(requests: reqs), id);
   }
 
   /// Pull daftar karyawan dari tab Karyawan (Sheet) → SQLite (upsert).

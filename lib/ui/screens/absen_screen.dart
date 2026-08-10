@@ -71,7 +71,15 @@ class _AbsenScreenState extends State<AbsenScreen> {
       final sheetId = prefs.getString('spreadsheet_id') ?? '';
       if (sheetId.isNotEmpty) {
         try {
-          await GoogleSheetService().appendAttendance(sheetId, bDateKey, empName, true);
+          // Pastikan service terhubung dulu (instance singleton bisa _api null
+          // kalau app baru buka & belum pernah sync).
+          final svc = GoogleSheetService();
+          if (!svc.isConnected) {
+            await svc.signIn(interactive: false);
+          }
+          await svc.appendAttendance(sheetId, bDateKey, empName, true);
+          // Segarkan matriks absen di Sheet biar langsung ke-lihat.
+          await svc.pushAbsensiMatriks(sheetId);
         } catch (e) {
           debugPrint('Append absensi ke Sheet gagal: $e');
         }

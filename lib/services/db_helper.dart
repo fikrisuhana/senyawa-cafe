@@ -706,6 +706,23 @@ class DbHelper {
     return res.map((m) => TransactionModel.fromMap(m)).toList();
   }
 
+  /// Pivot item terjual hari ini: group by nama menu, sum qty & subtotal.
+  /// Hanya transaksi ACTIVE. Dipakai buat seksi "Item Terjual" di Recap.
+  Future<List<Map<String, dynamic>>> getTodayItemSales(String businessDate) async {
+    final db = await database;
+    final res = await db.rawQuery('''
+      SELECT ti.name AS menu,
+             SUM(ti.qty) AS total_qty,
+             SUM(ti.subtotal) AS total_omzet
+      FROM transaction_items ti
+      INNER JOIN transactions t ON t.id = ti.trx_id
+      WHERE t.business_date = ? AND t.status = 'ACTIVE'
+      GROUP BY ti.name
+      ORDER BY total_qty DESC
+    ''', [businessDate]);
+    return res;
+  }
+
   Future<Map<String, dynamic>> getTodaySummary(String businessDate) async {
     final db = await database;
     final trxs = await db.query('transactions',
