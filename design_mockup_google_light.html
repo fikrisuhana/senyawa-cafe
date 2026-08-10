@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ruang Senyawa POS — Google Light Mode Redesign Mockup</title>
+
+  <!-- Google Fonts: Plus Jakarta Sans & Roboto -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      /* Google Material 3 Light Mode Tokens */
+      --bg-surface: #F8F9FA;
+      --bg-card: #FFFFFF;
+      --bg-subtle: #F1F3F4;
+      --border-color: #E0E0E0;
+      --border-active: #1A73E8;
+
+      --text-primary: #1F1F1F;
+      --text-secondary: #5F6368;
+      --text-muted: #80868B;
+
+      --primary: #1A73E8; /* Google Blue */
+      --primary-hover: #1557B0;
+      --primary-container: #E8F0FE;
+      --on-primary-container: #174EA6;
+
+      --accent-brown: #6F4E37; /* Coffee Theme Touch */
+      --accent-green: #0F9D58; /* Emerald Green */
+      --green-container: #E6F4EA;
+      --on-green-container: #137333;
+
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+      --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+      --shadow-lg: 0 10px 24px rgba(0,0,0,0.12);
+
+      --radius-sm: 8px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
+      --radius-pill: 999px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      background-color: #E9ECEF;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      color: var(--text-primary);
+      padding: 20px 10px;
+    }
+
+    /* Device Container Simulation */
+    .mobile-frame {
+      width: 100%;
+      max-width: 412px;
+      height: 870px;
+      background-color: var(--bg-surface);
+      border-radius: 36px;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.15), 0 0 0 10px #2D3139;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Top Phone Status Bar */
+    .status-bar {
+      height: 40px;
+      background: var(--bg-surface);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 20px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-primary);
+      user-select: none;
+      z-index: 10;
+    }
+
+    /* App Header */
+    .app-header {
+      background: #FFFFFF;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 10;
+    }
+
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-logo {
+      width: 36px;
+      height: 36px;
+      background: var(--accent-brown);
+      color: #FFFFFF;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 16px;
+    }
+
+    .brand-title {
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--text-primary);
+      line-height: 1.2;
+    }
+
+    .brand-subtitle {
+      font-size: 11px;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .sync-badge {
+      background: var(--green-container);
+      color: var(--on-green-container);
+      padding: 4px 10px;
+      border-radius: var(--radius-pill);
+      font-size: 10px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .dot {
+      width: 6px;
+      height: 6px;
+      background: var(--accent-green);
+      border-radius: 50%;
+    }
+
+    /* App Content Scrollable */
+    .app-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* Search Input */
+    .search-box {
+      background: var(--bg-subtle);
+      border-radius: var(--radius-pill);
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid transparent;
+      transition: all 0.2s ease;
+    }
+
+    .search-box:focus-within {
+      background: #FFFFFF;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(26,115,232,0.15);
+    }
+
+    .search-box input {
+      border: none;
+      background: transparent;
+      outline: none;
+      width: 100%;
+      font-size: 13px;
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    /* Category Filter Tabs */
+    .category-tabs {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      scrollbar-width: none;
+    }
+
+    .category-tabs::-webkit-scrollbar {
+      display: none;
+    }
+
+    .tab-chip {
+      padding: 8px 16px;
+      background: #FFFFFF;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-pill);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .tab-chip.active {
+      background: var(--primary-container);
+      color: var(--on-primary-container);
+      border-color: var(--primary);
+    }
+
+    /* Menu Grid */
+    .menu-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+
+    .menu-card {
+      background: var(--bg-card);
+      border-radius: var(--radius-md);
+      padding: 12px;
+      border: 1px solid var(--border-color);
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      position: relative;
+    }
+
+    .menu-card:hover, .menu-card:active {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-md);
+      border-color: var(--primary);
+    }
+
+    .menu-emoji {
+      font-size: 28px;
+      margin-bottom: 8px;
+      background: var(--bg-surface);
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .menu-category {
+      font-size: 10px;
+      font-weight: 800;
+      color: var(--primary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+
+    .menu-name {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 6px;
+      line-height: 1.3;
+    }
+
+    .menu-price {
+      font-size: 14px;
+      font-weight: 800;
+      color: var(--text-primary);
+    }
+
+    .menu-stock {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .variant-badge {
+      display: inline-block;
+      background: var(--bg-subtle);
+      color: var(--text-secondary);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 9px;
+      font-weight: 700;
+      margin-top: 6px;
+    }
+
+    /* Shift Selector Bar */
+    .shift-bar {
+      background: #FFFFFF;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+
+    .shift-selector {
+      border: none;
+      background: var(--bg-subtle);
+      padding: 6px 12px;
+      border-radius: var(--radius-pill);
+      font-weight: 700;
+      color: var(--text-primary);
+      outline: none;
+      cursor: pointer;
+    }
+
+    /* Bottom Navigation Bar */
+    .bottom-nav {
+      background: #FFFFFF;
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-around;
+      padding: 8px 0;
+      z-index: 10;
+    }
+
+    .nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 4px 12px;
+      border-radius: var(--radius-pill);
+      transition: all 0.2s ease;
+    }
+
+    .nav-item.active {
+      color: var(--primary);
+    }
+
+    .nav-item.active .nav-icon {
+      background: var(--primary-container);
+      color: var(--on-primary-container);
+      padding: 4px 16px;
+      border-radius: var(--radius-pill);
+    }
+
+    /* Modal Bottom Sheet */
+    .modal-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.4);
+      backdrop-filter: blur(4px);
+      z-index: 100;
+      display: none;
+      flex-direction: column;
+      justify-content: flex-end;
+      animation: fadeIn 0.2s ease;
+    }
+
+    .modal-overlay.active {
+      display: flex;
+    }
+
+    .bottom-sheet {
+      background: #FFFFFF;
+      border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+      padding: 20px;
+      max-height: 80%;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: var(--shadow-lg);
+      animation: slideUp 0.25s ease;
+    }
+
+    .sheet-handle {
+      width: 40px;
+      height: 4px;
+      background: #E0E0E0;
+      border-radius: 2px;
+      align-self: center;
+      margin-bottom: 4px;
+    }
+
+    .sheet-title {
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--text-primary);
+    }
+
+    .group-label {
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--text-secondary);
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .badge-wajib {
+      color: #D93025;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .options-wrap {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .chip-opt {
+      padding: 8px 16px;
+      background: #FFFFFF;
+      border: 1.5px solid var(--border-color);
+      border-radius: var(--radius-pill);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-primary);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .chip-opt.selected {
+      background: var(--primary-container);
+      border-color: var(--primary);
+      color: var(--on-primary-container);
+    }
+
+    .note-field {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1.5px solid var(--border-color);
+      border-radius: var(--radius-md);
+      outline: none;
+      font-size: 12px;
+      color: var(--text-primary);
+      background: var(--bg-surface);
+    }
+
+    .note-field:focus {
+      border-color: var(--primary);
+      background: #FFFFFF;
+    }
+
+    .btn-action-primary {
+      background: var(--primary);
+      color: #FFFFFF;
+      padding: 14px;
+      border-radius: var(--radius-md);
+      border: none;
+      font-weight: 800;
+      font-size: 14px;
+      cursor: pointer;
+      text-align: center;
+      transition: background 0.2s ease;
+      box-shadow: 0 4px 12px rgba(26,115,232,0.25);
+    }
+
+    .btn-action-primary:active {
+      background: var(--primary-hover);
+    }
+
+    .btn-action-secondary {
+      background: var(--bg-subtle);
+      color: var(--text-primary);
+      padding: 12px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-color);
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      text-align: center;
+    }
+
+    /* Floating Cart Bar */
+    .cart-float-bar {
+      position: absolute;
+      bottom: 64px;
+      left: 16px;
+      right: 16px;
+      background: #FFFFFF;
+      border: 1.5px solid var(--primary);
+      border-radius: var(--radius-pill);
+      padding: 10px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: var(--shadow-lg);
+      z-index: 50;
+      cursor: pointer;
+    }
+
+    .cart-info-count {
+      background: var(--primary);
+      color: #FFFFFF;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(100%); }
+      to { transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="mobile-frame">
+    <!-- Status Bar -->
+    <div class="status-bar">
+      <span>14:30</span>
+      <span>⚡ 100%</span>
+    </div>
+
+    <!-- App Header -->
+    <div class="app-header">
+      <div class="header-brand">
+        <div class="brand-logo">RS</div>
+        <div>
+          <div class="brand-title">Ruang Senyawa POS</div>
+          <div class="brand-subtitle">Kasir: <strong style="color: var(--primary);" id="activeKasirName">Andi</strong> ✏️</div>
+        </div>
+      </div>
+      <div class="sync-badge">
+        <span class="dot"></span>
+        <span>Sinkron Google Sheet</span>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="app-content" id="mainContent">
+
+      <!-- Quick Search -->
+      <div class="search-box">
+        <span style="color: var(--text-muted);">🔍</span>
+        <input type="text" placeholder="Cari menu kopi atau makanan..." id="searchInput" onkeyup="filterMenu()">
+      </div>
+
+      <!-- Categories -->
+      <div class="category-tabs">
+        <div class="tab-chip active" onclick="selectCategory(this, 'SEMUA')">SEMUA</div>
+        <div class="tab-chip" onclick="selectCategory(this, 'KOPI')">☕ KOPI</div>
+        <div class="tab-chip" onclick="selectCategory(this, 'NON-KOPI')">🥛 NON-KOPI</div>
+        <div class="tab-chip" onclick="selectCategory(this, 'MAKANAN')">🥐 MAKANAN</div>
+      </div>
+
+      <!-- Menu Grid -->
+      <div class="menu-grid" id="menuGrid">
+        
+        <div class="menu-card" onclick="openVariantSheet('Kopi Susu Senyawa', 13000, '☕')">
+          <div class="menu-emoji">☕</div>
+          <div class="menu-category">KOPI</div>
+          <div class="menu-name">Kopi Susu Senyawa</div>
+          <div class="menu-price">Rp13.000</div>
+          <div class="menu-stock">Sisa Stok: 298</div>
+          <div class="variant-badge">+ Varian (Gula/Suhu/Shot)</div>
+        </div>
+
+        <div class="menu-card" onclick="openVariantSheet('Kopi Susu Gula Aren', 15000, '☕')">
+          <div class="menu-emoji">☕</div>
+          <div class="menu-category">KOPI</div>
+          <div class="menu-name">Kopi Susu Gula Aren</div>
+          <div class="menu-price">Rp15.000</div>
+          <div class="menu-stock">Sisa Stok: 298</div>
+          <div class="variant-badge">+ Varian (Gula/Suhu)</div>
+        </div>
+
+        <div class="menu-card" onclick="openVariantSheet('Americano', 13000, '☕')">
+          <div class="menu-emoji">☕</div>
+          <div class="menu-category">KOPI</div>
+          <div class="menu-name">Americano</div>
+          <div class="menu-price">Rp13.000</div>
+          <div class="menu-stock">Sisa Stok: 298</div>
+          <div class="variant-badge">+ Varian (Suhu/Shot)</div>
+        </div>
+
+        <div class="menu-card" onclick="openVariantSheet('Kopi Susu Oat', 15000, '🥛')">
+          <div class="menu-emoji">🥛</div>
+          <div class="menu-category">NON-KOPI</div>
+          <div class="menu-name">Kopi Susu Oat</div>
+          <div class="menu-price">Rp15.000</div>
+          <div class="menu-stock">Sisa Stok: 298</div>
+          <div class="variant-badge">+ Varian</div>
+        </div>
+
+        <div class="menu-card" onclick="directAddToCart('Croissant Butter', 18000)">
+          <div class="menu-emoji">🥐</div>
+          <div class="menu-category">MAKANAN</div>
+          <div class="menu-name">Croissant Butter</div>
+          <div class="menu-price">Rp18.000</div>
+          <div class="menu-stock">Sisa Stok: 50</div>
+        </div>
+
+        <div class="menu-card" onclick="directAddToCart('Brownies Fudgy', 15000)">
+          <div class="menu-emoji">🍫</div>
+          <div class="menu-category">MAKANAN</div>
+          <div class="menu-name">Brownies Fudgy</div>
+          <div class="menu-price">Rp15.000</div>
+          <div class="menu-stock">Sisa Stok: 45</div>
+        </div>
+
+      </div>
+
+      <!-- Shift Switcher -->
+      <div class="shift-bar">
+        <span>👤 Shift Kasir Aktif:</span>
+        <select class="shift-selector" id="kasirSelect" onchange="changeKasir(this.value)">
+          <option value="Andi">Andi (Shift Pagi)</option>
+          <option value="Budi">Budi (Shift Siang)</option>
+          <option value="Citra">Citra (Shift Malam)</option>
+        </select>
+      </div>
+
+    </div>
+
+    <!-- Floating Cart Bar -->
+    <div class="cart-float-bar" id="cartFloatBar" onclick="openCartModal()" style="display: none;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <div class="cart-info-count" id="cartCount">1</div>
+        <div>
+          <div style="font-size: 13px; font-weight: 800; color: var(--text-primary);" id="cartSummary">1 Pesanan</div>
+          <div style="font-size: 10px; color: var(--text-secondary);" id="cartDetailText">Kopi Susu Senyawa (Dingin, Normal)</div>
+        </div>
+      </div>
+      <div style="font-size: 14px; font-weight: 800; color: var(--primary);" id="cartTotal">Rp13.000 →</div>
+    </div>
+
+    <!-- Bottom Navigation Bar -->
+    <div class="bottom-nav">
+      <div class="nav-item active" onclick="switchNav('kasir')">
+        <div class="nav-icon">🛍️</div>
+        <span>Kasir</span>
+      </div>
+      <div class="nav-item" onclick="switchNav('rekap')">
+        <div class="nav-icon">📊</div>
+        <span>Rekap</span>
+      </div>
+      <div class="nav-item" onclick="switchNav('absen')">
+        <div class="nav-icon">⏰</div>
+        <span>Absen</span>
+      </div>
+      <div class="nav-item" onclick="switchNav('admin')">
+        <div class="nav-icon">⚙️</div>
+        <span>Admin</span>
+      </div>
+    </div>
+
+    <!-- Variant Bottom Sheet Modal -->
+    <div class="modal-overlay" id="variantModal">
+      <div class="bottom-sheet">
+        <div class="sheet-handle"></div>
+        <div class="sheet-title" id="modalMenuName">Kopi Susu Senyawa</div>
+        
+        <!-- Group Suhu -->
+        <div>
+          <div class="group-label">
+            <span>Suhu Minuman</span>
+            <span class="badge-wajib">• Wajib</span>
+          </div>
+          <div class="options-wrap">
+            <div class="chip-opt selected" onclick="selectChip(this, 'suhu')">Dingin (Es)</div>
+            <div class="chip-opt" onclick="selectChip(this, 'suhu')">Panas</div>
+          </div>
+        </div>
+
+        <!-- Group Sugar -->
+        <div>
+          <div class="group-label">
+            <span>Tingkat Gula (Sugar)</span>
+          </div>
+          <div class="options-wrap">
+            <div class="chip-opt selected" onclick="selectChip(this, 'gula')">Normal</div>
+            <div class="chip-opt" onclick="selectChip(this, 'gula')">Less Sugar</div>
+          </div>
+        </div>
+
+        <!-- Group Shot -->
+        <div>
+          <div class="group-label">
+            <span>Pilihan Extra Shot Espreso</span>
+          </div>
+          <div class="options-wrap">
+            <div class="chip-opt selected" onclick="selectChip(this, 'shot', 0)">Normal</div>
+            <div class="chip-opt" onclick="selectChip(this, 'shot', 3000)">2 Shot (+3k)</div>
+            <div class="chip-opt" onclick="selectChip(this, 'shot', 5000)">3 Shot (+5k)</div>
+          </div>
+        </div>
+
+        <!-- Note Field -->
+        <div>
+          <div class="group-label">Catatan Tambahan (Opsional)</div>
+          <input type="text" class="note-field" placeholder="Misal: Kurangi es batu, pakai cup plastik 16oz..." id="itemNote">
+        </div>
+
+        <!-- Submit Button -->
+        <button class="btn-action-primary" id="btnAddCart" onclick="confirmAddToCart()">Tambah Ke Keranjang • Rp13.000</button>
+        <button class="btn-action-secondary" onclick="closeVariantModal()">Batal</button>
+
+      </div>
+    </div>
+
+    <!-- Cart & Checkout Modal -->
+    <div class="modal-overlay" id="cartModal">
+      <div class="bottom-sheet">
+        <div class="sheet-handle"></div>
+        <div class="sheet-title">🛒 Ringkasan Pesanan Kasir</div>
+        
+        <div id="cartItemsList" style="display: flex; flex-direction: column; gap: 10px; max-height: 200px; overflow-y: auto;">
+          <!-- Items will be populated here -->
+        </div>
+
+        <div style="border-top: 1px dashed var(--border-color); padding-top: 10px; display: flex; flex-direction: column; gap: 6px;">
+          <div style="display: flex; justify-content: space-between; font-size: 13px; color: var(--text-secondary);">
+            <span>Subtotal</span>
+            <span id="modalSubtotal">Rp13.000</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; font-size: 15px; font-weight: 800; color: var(--text-primary);">
+            <span>TOTAL BAYAR</span>
+            <span id="modalTotal" style="color: var(--primary);">Rp13.000</span>
+          </div>
+        </div>
+
+        <button class="btn-action-primary" onclick="showReceiptModal()">💳 Bayar & Cetak Struk (ESC/POS)</button>
+        <button class="btn-action-secondary" onclick="closeCartModal()">Tambah Menu Lain</button>
+      </div>
+    </div>
+
+    <!-- Receipt Preview Modal -->
+    <div class="modal-overlay" id="receiptModal">
+      <div class="bottom-sheet" style="align-items: center;">
+        <div class="sheet-handle"></div>
+        <div class="sheet-title" style="color: var(--on-green-container);">🖨️ Struk Berhasil Dicetak!</div>
+        
+        <div style="background: #FFFFFF; border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; width: 100%; font-family: monospace; font-size: 11px; line-height: 1.4; box-shadow: var(--shadow-sm);">
+          <div style="text-align: center; font-weight: bold; font-size: 13px;">RUANG SENYAWA COFFEE</div>
+          <div style="text-align: center; color: var(--text-secondary);">Instagram: @r_senyawa</div>
+          <div>--------------------------------</div>
+          <div>Kode  : TRX-20260731-001</div>
+          <div>Kasir : <span id="receiptKasir">Andi</span></div>
+          <div>Tipe  : Di Tempat</div>
+          <div>--------------------------------</div>
+          <div id="receiptItems">1x Kopi Susu Senyawa = Rp13.000</div>
+          <div>--------------------------------</div>
+          <div style="font-weight: bold;">TOTAL : Rp13.000</div>
+          <div>Bayar : Rp50.000</div>
+          <div>Kembali: Rp37.000</div>
+          <div>--------------------------------</div>
+          <div style="text-align: center; font-size: 10px; color: var(--text-secondary);">WiFi: Ruang Senyawa<br>Password: followIGdulu</div>
+        </div>
+
+        <button class="btn-action-primary" style="width: 100%;" onclick="resetOrder()">⚡ Transaksi Baru Selesai</button>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    let activeItem = { name: '', price: 13000, extra: 0 };
+    let cart = [];
+
+    function openVariantSheet(name, price, emoji) {
+      activeItem = { name: name, price: price, extra: 0 };
+      document.getElementById('modalMenuName').innerText = name;
+      updateModalPrice();
+      document.getElementById('variantModal').classList.add('active');
+    }
+
+    function closeVariantModal() {
+      document.getElementById('variantModal').classList.remove('active');
+    }
+
+    function selectChip(el, group, extraPrice = 0) {
+      const parent = el.parentElement;
+      parent.querySelectorAll('.chip-opt').forEach(c => c.classList.remove('selected'));
+      el.classList.add('selected');
+
+      if (group === 'shot') {
+        activeItem.extra = extraPrice;
+        updateModalPrice();
+      }
+    }
+
+    function updateModalPrice() {
+      const total = activeItem.price + activeItem.extra;
+      document.getElementById('btnAddCart').innerText = `Tambah Ke Keranjang • Rp${total.toLocaleString('id-ID')}`;
+    }
+
+    function confirmAddToCart() {
+      cart.push({
+        name: activeItem.name,
+        price: activeItem.price + activeItem.extra,
+        note: document.getElementById('itemNote').value
+      });
+      closeVariantModal();
+      renderCartFloat();
+    }
+
+    function directAddToCart(name, price) {
+      cart.push({ name: name, price: price, note: '' });
+      renderCartFloat();
+    }
+
+    function renderCartFloat() {
+      if (cart.length === 0) {
+        document.getElementById('cartFloatBar').style.display = 'none';
+        return;
+      }
+      document.getElementById('cartFloatBar').style.display = 'flex';
+      document.getElementById('cartCount').innerText = cart.length;
+      document.getElementById('cartSummary').innerText = `${cart.length} Pesanan Berhasil`;
+      document.getElementById('cartDetailText').innerText = cart.map(i => i.name).join(', ');
+
+      const total = cart.reduce((acc, item) => acc + item.price, 0);
+      document.getElementById('cartTotal').innerText = `Rp${total.toLocaleString('id-ID')} →`;
+    }
+
+    function openCartModal() {
+      const listEl = document.getElementById('cartItemsList');
+      listEl.innerHTML = '';
+      let total = 0;
+
+      cart.forEach((item, idx) => {
+        total += item.price;
+        listEl.innerHTML += `
+          <div style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-surface); padding: 8px 12px; border-radius: 8px;">
+            <div>
+              <div style="font-weight: 700; font-size: 13px;">${item.name}</div>
+              ${item.note ? `<div style="font-size: 10px; color: var(--accent-brown);">Note: ${item.note}</div>` : ''}
+            </div>
+            <div style="font-weight: 800; font-size: 13px;">Rp${item.price.toLocaleString('id-ID')}</div>
+          </div>
+        `;
+      });
+
+      document.getElementById('modalSubtotal').innerText = `Rp${total.toLocaleString('id-ID')}`;
+      document.getElementById('modalTotal').innerText = `Rp${total.toLocaleString('id-ID')}`;
+      document.getElementById('cartModal').classList.add('active');
+    }
+
+    function closeCartModal() {
+      document.getElementById('cartModal').classList.remove('active');
+    }
+
+    function showReceiptModal() {
+      closeCartModal();
+      document.getElementById('receiptKasir').innerText = document.getElementById('kasirSelect').value;
+      document.getElementById('receiptModal').classList.add('active');
+    }
+
+    function resetOrder() {
+      cart = [];
+      document.getElementById('receiptModal').classList.remove('active');
+      renderCartFloat();
+    }
+
+    function changeKasir(val) {
+      document.getElementById('activeKasirName').innerText = val;
+    }
+
+    function filterMenu() {
+      const q = document.getElementById('searchInput').value.toLowerCase();
+      const cards = document.querySelectorAll('.menu-card');
+      cards.forEach(card => {
+        const text = card.innerText.toLowerCase();
+        card.style.display = text.includes(q) ? 'flex' : 'none';
+      });
+    }
+
+    function selectCategory(el, cat) {
+      document.querySelectorAll('.tab-chip').forEach(c => c.classList.remove('active'));
+      el.classList.add('active');
+
+      const cards = document.querySelectorAll('.menu-card');
+      cards.forEach(card => {
+        if (cat === 'SEMUA') {
+          card.style.display = 'flex';
+        } else {
+          const categoryText = card.querySelector('.menu-category').innerText;
+          card.style.display = categoryText.includes(cat) ? 'flex' : 'none';
+        }
+      });
+    }
+
+    function switchNav(nav) {
+      document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+      event.currentTarget.classList.add('active');
+      if (nav === 'admin') {
+        alert("⚙️ Halaman Admin Hub: Di sini bro bisa atur Resep Bahan, Stok Cup, dan Setelan Printer Bluetooth!");
+      }
+    }
+  </script>
+</body>
+</html>

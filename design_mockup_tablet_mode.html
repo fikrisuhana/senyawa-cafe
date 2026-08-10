@@ -1,0 +1,1182 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ruang Senyawa POS — Mockup Tablet (Fully Complete 4 Views & 5 Admin Tabs)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-color: #F8F9FA;
+      --card-bg: #FFFFFF;
+      --text-color: #1F1F1F;
+      --text-sub: #5F6368;
+      --primary: #1A73E8;
+      --primary-container: #E8F0FE;
+      --secondary: #0F9D58;
+      --border-color: #E0E0E0;
+      --header-bg: #1A73E8;
+      --header-text: #FFFFFF;
+      --cart-pane-bg: #FFFFFF;
+      --nav-bg: #FFFFFF;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Roboto', sans-serif;
+    }
+
+    body {
+      background-color: #E0E0E0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .tablet-frame {
+      width: 1024px;
+      height: 720px;
+      background-color: var(--bg-color);
+      border-radius: 20px;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.3);
+      border: 10px solid #2B2B2B;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Top App Bar */
+    .app-bar {
+      background-color: var(--header-bg);
+      color: var(--header-text);
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+      z-index: 10;
+    }
+
+    .brand-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-logo {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: #FFFFFF;
+      color: #1A73E8;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      font-size: 14px;
+      border: 2px solid #FFFFFF;
+    }
+
+    .brand-text h1 {
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .brand-text p {
+      font-size: 11px;
+      opacity: 0.9;
+    }
+
+    .badge-sync {
+      background: rgba(255,255,255,0.2);
+      padding: 6px 12px;
+      border-radius: 14px;
+      font-size: 11px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #00E676;
+    }
+
+    /* Main Body Container */
+    .tablet-body {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .view-panel {
+      display: none;
+      width: 100%;
+      height: 100%;
+    }
+
+    .view-panel.active {
+      display: flex;
+    }
+
+    /* 1. KASIR VIEW */
+    .left-pane {
+      flex: 14;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow-y: auto;
+      border-right: 1px solid var(--border-color);
+    }
+
+    .search-box {
+      width: 100%;
+      padding: 10px 16px;
+      border-radius: 24px;
+      border: 1px solid var(--border-color);
+      background: var(--card-bg);
+      color: var(--text-color);
+      font-size: 13px;
+      outline: none;
+    }
+
+    .category-chips {
+      display: flex;
+      gap: 8px;
+    }
+
+    .chip {
+      padding: 6px 14px;
+      border-radius: 16px;
+      border: 1px solid var(--border-color);
+      background: var(--card-bg);
+      color: var(--text-color);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .chip.active {
+      background: var(--primary-container);
+      color: var(--primary);
+      border-color: var(--primary);
+    }
+
+    .menu-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      align-content: start;
+    }
+
+    .menu-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      cursor: pointer;
+      transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+      height: 105px;
+      user-select: none;
+    }
+
+    .menu-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--primary);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+
+    .menu-cat {
+      font-size: 9px;
+      text-transform: uppercase;
+      color: var(--text-sub);
+      font-weight: 700;
+    }
+
+    .menu-name {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-color);
+      margin: 4px 0;
+    }
+
+    .menu-card-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      margin-top: auto;
+    }
+
+    .menu-price {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--secondary);
+    }
+
+    .menu-stock {
+      font-size: 10px;
+      color: var(--text-sub);
+    }
+
+    .cashier-selector-bar {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      margin-top: auto;
+    }
+
+    .right-pane {
+      flex: 11;
+      background: var(--cart-pane-bg);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .cart-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .cart-header h2 {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-color);
+    }
+
+    .order-type-toggle {
+      display: flex;
+      gap: 6px;
+      margin: 12px 0;
+    }
+
+    .btn-type {
+      flex: 1;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      background: var(--card-bg);
+      color: var(--text-color);
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      text-align: center;
+    }
+
+    .btn-type.active {
+      background: var(--primary);
+      color: #FFFFFF;
+      border-color: var(--primary);
+    }
+
+    .cart-list {
+      flex: 1;
+      overflow-y: auto;
+      margin-bottom: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 280px;
+    }
+
+    .cart-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+    }
+
+    .stepper {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-step {
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      border: 1px solid var(--border-color);
+      background: var(--card-bg);
+      color: var(--text-color);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    .cart-summary {
+      border-top: 1px solid var(--border-color);
+      padding-top: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text-sub);
+    }
+
+    .summary-row.total {
+      font-size: 15px;
+      font-weight: 900;
+      color: var(--text-color);
+    }
+
+    .btn-checkout {
+      background: var(--secondary);
+      color: white;
+      border: none;
+      width: 100%;
+      padding: 12px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+
+    /* 2. REKAP VIEW */
+    .recap-container {
+      width: 100%;
+      padding: 20px;
+      overflow-y: auto;
+      color: var(--text-color);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .recap-header-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .recap-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .stat-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 14px;
+    }
+
+    .stat-card h3 {
+      font-size: 11px;
+      color: var(--text-sub);
+    }
+
+    .stat-card .value {
+      font-size: 18px;
+      font-weight: 900;
+      color: var(--secondary);
+      margin-top: 4px;
+    }
+
+    .recap-table-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 16px;
+    }
+
+    .recap-table-card table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: 12px;
+    }
+
+    .recap-table-card th, .recap-table-card td {
+      padding: 10px;
+      border-bottom: 1px solid var(--border-color);
+      text-align: left;
+    }
+
+    /* 3. ABSEN VIEW */
+    .absen-container {
+      width: 100%;
+      padding: 24px;
+      overflow-y: auto;
+      color: var(--text-color);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .emp-absen-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      padding: 16px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .btn-shift {
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      background: var(--card-bg);
+      color: var(--text-color);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-shift.present {
+      background: #356A58;
+      color: #FFFFFF;
+      border-color: #356A58;
+    }
+
+    /* 4. ADMIN HUB VIEW */
+    .admin-container {
+      width: 100%;
+      padding: 20px;
+      overflow-y: auto;
+      color: var(--text-color);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .admin-top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--card-bg);
+      padding: 12px 16px;
+      border-radius: 12px;
+      border: 1px solid var(--border-color);
+    }
+
+    .admin-sub-tabs {
+      display: flex;
+      gap: 8px;
+      border-bottom: 2px solid var(--border-color);
+      padding-bottom: 8px;
+      overflow-x: auto;
+    }
+
+    .admin-tab {
+      padding: 8px 14px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-sub);
+      cursor: pointer;
+      border-radius: 8px;
+      white-space: nowrap;
+    }
+
+    .admin-tab.active {
+      color: var(--primary);
+      background: var(--primary-container);
+    }
+
+    .admin-section {
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .admin-section.active {
+      display: flex;
+    }
+
+    .admin-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .btn-action-outline {
+      border: 1px solid var(--primary);
+      color: var(--primary);
+      background: transparent;
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .btn-action-fill {
+      border: none;
+      color: white;
+      background: var(--secondary);
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .bottom-nav {
+      background: var(--nav-bg);
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-around;
+      padding: 8px 0;
+      z-index: 10;
+    }
+
+    .nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      color: var(--text-sub);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 6px 24px;
+      border-radius: 8px;
+    }
+
+    .nav-item.active {
+      color: var(--primary);
+    }
+
+    /* VARIANT MODAL OVERLAY */
+    .modal-overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.5);
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+      z-index: 99;
+    }
+
+    .modal-overlay.active {
+      display: flex;
+    }
+
+    .variant-sheet-card {
+      width: 100%;
+      max-width: 500px;
+      background: var(--card-bg);
+      border-radius: 20px 20px 0 0;
+      padding: 20px;
+      box-shadow: 0 -4px 20px rgba(0,0,0,0.2);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .variant-group-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-sub);
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    .opt-chip {
+      padding: 8px 16px;
+      border-radius: 20px;
+      border: 1px solid var(--border-color);
+      background: var(--card-bg);
+      color: var(--text-color);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .opt-chip.active {
+      background: var(--primary-container);
+      color: var(--primary);
+      border-color: var(--primary);
+    }
+  </style>
+</head>
+<body>
+
+  <h3 style="color: #222; margin-bottom: 12px; font-weight: 700;">☕ RUANG SENYAWA POS — MOCKUP TABLET (100% LENGKAP SEMUA PANELS & TABS)</h3>
+
+  <div class="tablet-frame">
+    <!-- Top App Bar -->
+    <div class="app-bar">
+      <div class="brand-info">
+        <div class="brand-logo">RS</div>
+        <div class="brand-text">
+          <h1>Ruang Senyawa</h1>
+          <p>👤 Kasir: <span id="headerCashierName">Andi</span> (Shift Siang) ✏️</p>
+        </div>
+      </div>
+      <div class="badge-sync"><div class="dot"></div> Sinkron Google Sheet OK</div>
+    </div>
+
+    <!-- Tablet Body Views -->
+    <div class="tablet-body">
+
+      <!-- 1. KASIR VIEW -->
+      <div class="view-panel active" id="view-kasir">
+        <div class="left-pane">
+          <input type="text" class="search-box" id="searchInput" onkeyup="filterMenu()" placeholder="🔍 Cari menu cepat...">
+          <div class="category-chips">
+            <div class="chip active" onclick="filterCategory(this, 'ALL')">SEMUA</div>
+            <div class="chip" onclick="filterCategory(this, 'KOPI')">KOPI</div>
+            <div class="chip" onclick="filterCategory(this, 'MAKANAN')">MAKANAN</div>
+          </div>
+          <div class="menu-grid" id="menuGrid"></div>
+          <div class="cashier-selector-bar" onclick="selectCashier()">
+            <span style="font-size:12px; font-weight:700; color:var(--text-color);">👤 Kasir Shift Saat Ini: <span id="activeCashierName" style="color:var(--primary)">Andi</span></span>
+            <span style="font-size:12px; color:var(--text-sub);">Ganti Kasir ▾</span>
+          </div>
+        </div>
+        <div class="right-pane">
+          <div>
+            <div class="cart-header">
+              <h2>🛒 Keranjang Pesanan (<span id="itemCount">0</span>)</h2>
+              <button style="background:none; border:none; color:#FF5252; font-size:11px; cursor:pointer; font-weight:700;" onclick="clearCart()">Kosongkan</button>
+            </div>
+            <div class="order-type-toggle">
+              <div class="btn-type active" onclick="setOrderType(this)">🍽️ Di Tempat</div>
+              <div class="btn-type" onclick="setOrderType(this)">🥡 Bungkus</div>
+            </div>
+            <div class="cart-list" id="cartList"></div>
+          </div>
+          <div class="cart-summary">
+            <div class="summary-row"><span>Subtotal</span><span id="subtotalText">Rp0</span></div>
+            <div class="summary-row"><span>Voucher / Diskon</span><span style="color:var(--primary); font-weight:700; cursor:pointer;" onclick="alert('Diskon 10% Terpasang')">[ Diskon 10% ]</span></div>
+            <div class="summary-row total"><span>TOTAL</span><span id="totalPrice" style="color:var(--secondary)">Rp0</span></div>
+            <button class="btn-checkout" onclick="checkout()">💳 PROSES BAYAR & CETAK STRUK</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. REKAP VIEW -->
+      <div class="view-panel" id="view-recap">
+        <div class="recap-container">
+          <div class="recap-header-card">
+            <div>
+              <h2>📊 Rekapitulasi Kasir Shift Hari Ini</h2>
+              <p style="color:var(--text-sub); font-size:12px; margin-top:2px;">Kasir: Andi | Kas Modal Awal: <b>Rp250.000</b> (Ruang Senyawa Master)</p>
+            </div>
+            <button class="btn-action-fill" onclick="alert('Cetak Ringkasan Shift ke Printer Thermal POS-5802 Sukses!')">🖨️ Cetak Rekap Shift</button>
+          </div>
+
+          <div class="recap-grid">
+            <div class="stat-card">
+              <h3>TOTAL OMSET SHIFT</h3>
+              <div class="value">Rp450.000</div>
+            </div>
+            <div class="stat-card">
+              <h3>PEMBAYARAN TUNAI</h3>
+              <div class="value">Rp320.000</div>
+            </div>
+            <div class="stat-card">
+              <h3>PEMBAYARAN QRIS</h3>
+              <div class="value">Rp130.000</div>
+            </div>
+            <div class="stat-card">
+              <h3>TOTAL TRX</h3>
+              <div class="value">18 Trx</div>
+            </div>
+          </div>
+
+          <div class="recap-table-card">
+            <h3 style="font-size:14px; margin-bottom:8px;">📜 Riwayat Transaksi Shift Ini</h3>
+            <table>
+              <thead>
+                <tr style="color:var(--text-sub);">
+                  <th>No Nota</th>
+                  <th>Waktu</th>
+                  <th>Menu Pesanan</th>
+                  <th>Total</th>
+                  <th>Bayar via</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><b>TRX-20260801-001</b></td>
+                  <td>08:15 WIB</td>
+                  <td>2x Kopi Susu Senyawa, 1x Indomie Goreng</td>
+                  <td><b>Rp38.000</b></td>
+                  <td><span style="color:var(--secondary); font-weight:700;">TUNAI</span></td>
+                </tr>
+                <tr>
+                  <td><b>TRX-20260801-002</b></td>
+                  <td>08:42 WIB</td>
+                  <td>1x Kopi Susu Gula Aren (Ice)</td>
+                  <td><b>Rp15.000</b></td>
+                  <td><span style="color:var(--primary); font-weight:700;">QRIS</span></td>
+                </tr>
+                <tr>
+                  <td><b>TRX-20260801-003</b></td>
+                  <td>09:10 WIB</td>
+                  <td>1x Americano (Hot), 1x Indomie Goreng Telur</td>
+                  <td><b>Rp28.000</b></td>
+                  <td><span style="color:var(--secondary); font-weight:700;">TUNAI</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. ABSEN VIEW (LENGKAP CARDS UNTUK KARYAWAN) -->
+      <div class="view-panel" id="view-absen">
+        <div class="absen-container">
+          <h2 style="font-size:20px; font-weight:700;">Absensi Karyawan</h2>
+          <p style="color:var(--primary); font-size:12px; margin-top:-6px;">Hari usaha: Sabtu, 1 Agt 2026 • klik shift = tandai masuk</p>
+
+          <div id="absenListContainer" style="display:flex; flex-direction:column; gap:12px; margin-top:8px;">
+            <div class="emp-absen-card">
+              <span style="font-size:15px; font-weight:700;">👤 Andi</span>
+              <div style="display:flex; gap:8px;">
+                <button class="btn-shift present" onclick="toggleShiftBtn(this, 'Andi', 'Pagi')">☀️ Shift Pagi ✓</button>
+                <button class="btn-shift" onclick="toggleShiftBtn(this, 'Andi', 'Sore')">🌇 Shift Sore</button>
+              </div>
+            </div>
+            <div class="emp-absen-card">
+              <span style="font-size:15px; font-weight:700;">👤 Budi</span>
+              <div style="display:flex; gap:8px;">
+                <button class="btn-shift" onclick="toggleShiftBtn(this, 'Budi', 'Pagi')">☀️ Shift Pagi</button>
+                <button class="btn-shift" onclick="toggleShiftBtn(this, 'Budi', 'Sore')">🌇 Shift Sore</button>
+              </div>
+            </div>
+            <div class="emp-absen-card">
+              <span style="font-size:15px; font-weight:700;">👤 Citra</span>
+              <div style="display:flex; gap:8px;">
+                <button class="btn-shift" onclick="toggleShiftBtn(this, 'Citra', 'Pagi')">☀️ Shift Pagi</button>
+                <button class="btn-shift present" onclick="toggleShiftBtn(this, 'Citra', 'Sore')">🌇 Shift Sore ✓</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. ADMIN HUB VIEW (LENGKAP 5 SUB-TAB) -->
+      <div class="view-panel" id="view-admin">
+        <div class="admin-container">
+          <div class="admin-top-bar">
+            <div>
+              <span style="font-weight:700; font-size:14px;">🔓 Mode Admin Unlocked</span>
+              <p style="font-size:11px; color:var(--text-sub);">5 Tab Pengaturan Lengkap Persis Seperti di HP</p>
+            </div>
+            <button style="background:#E53935; color:white; border:none; padding:6px 12px; border-radius:8px; font-weight:700; font-size:11px; cursor:pointer;" onclick="switchNav('kasir')">Keluar Admin</button>
+          </div>
+
+          <!-- 5 Sub-Tabs Admin -->
+          <div class="admin-sub-tabs">
+            <div class="admin-tab active" onclick="switchAdminTab(this, 'setelan')">1. Setelan App</div>
+            <div class="admin-tab" onclick="switchAdminTab(this, 'menu')">2. Kelola Menu</div>
+            <div class="admin-tab" onclick="switchAdminTab(this, 'stok')">3. Stok & Bahan</div>
+            <div class="admin-tab" onclick="switchAdminTab(this, 'voucher')">4. Voucher</div>
+            <div class="admin-tab" onclick="switchAdminTab(this, 'staf')">5. Staf / Karyawan</div>
+          </div>
+
+          <!-- Admin Tab 1: Setelan App -->
+          <div class="admin-section active" id="admin-sec-setelan">
+            <div class="admin-card">
+              <h3 style="font-size:14px;">🗚 Ukuran Teks Aplikasi (In-App Scaling)</h3>
+              <p style="font-size:12px; color:var(--text-sub);">Atur skala font untuk kenyamanan HP atau Tablet</p>
+              <div style="display:flex; gap:8px;">
+                <button class="btn-action-outline">Ringkas (88%)</button>
+                <button class="btn-action-fill">Normal (100%)</button>
+                <button class="btn-action-outline">Besar (115%)</button>
+              </div>
+            </div>
+            <div class="admin-card">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                  <h3 style="font-size:14px;">🖨️ Printer Thermal Bluetooth</h3>
+                  <p style="font-size:12px; color:var(--text-sub);">Terhubung: RPP02N / Thermal 58mm | Header: Instagram: @r_senyawa</p>
+                </div>
+                <button class="btn-action-outline" onclick="alert('Setting Printer Bluetooth')">Atur Printer</button>
+              </div>
+              <button class="btn-action-fill" onclick="alert('Tes Cetak Struk Sukses!')">Tes Cetak Struk ke Printer</button>
+            </div>
+            <div class="admin-card">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                  <h3 style="font-size:14px;">📊 Integrasi Google Sheet Master</h3>
+                  <p style="font-size:12px; color:var(--text-sub);">Sheet ID: 1RuangSenyawaLedger2026 | Status: Synchronized</p>
+                </div>
+                <button class="btn-action-fill" onclick="alert('Sinkronisasi Google Sheet Sukses!')">Sinkron Sekarang</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Admin Tab 2: Kelola Menu -->
+          <div class="admin-section" id="admin-sec-menu">
+            <div class="admin-card">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h3 style="font-size:14px;">➕ Tambah Menu Baru</h3>
+                <button class="btn-action-fill" onclick="alert('Buka Form Tambah Menu Baru')">+ Tambah Menu</button>
+              </div>
+            </div>
+            <div class="admin-card">
+              <h3 style="font-size:14px; margin-bottom:8px;">Daftar Menu Ruang Senyawa</h3>
+              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-color); padding:6px 0;">
+                <span>☕ Kopi Susu Senyawa (Rp13.000) - Modal Rp7.000</span>
+                <span style="color:var(--primary); cursor:pointer; font-weight:700;" onclick="alert('Varian: SUGAR, Suhu, SHOT')">🎛️ Atur Varian</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-color); padding:6px 0;">
+                <span>☕ Kopi Susu Gula Aren (Rp15.000) - Modal Rp10.000</span>
+                <span style="color:var(--primary); cursor:pointer; font-weight:700;" onclick="alert('Varian: Suhu')">🎛️ Atur Varian</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Admin Tab 3: Stok & Bahan -->
+          <div class="admin-section" id="admin-sec-stok">
+            <div class="admin-card">
+              <h3 style="font-size:14px;">📦 Packaging & Bahan Baku (Data Real Seeder)</h3>
+              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-color); padding:6px 0;">
+                <span>🥤 Cup Plastik 16oz</span>
+                <span><b>Stok: 482 pcs</b> (Min: 50)</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-color); padding:6px 0;">
+                <span>☕ Cup Panas 8oz</span>
+                <span><b>Stok: 297 pcs</b> (Min: 50)</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-color); padding:6px 0;">
+                <span>🍜 Mie (porsi)</span>
+                <span><b>Stok: 97 porsi</b> (Min: 20)</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-color); padding:6px 0;">
+                <span>🍱 Wadah Makan</span>
+                <span><b>Stok: 196 pcs</b> (Min: 30)</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Admin Tab 4: Voucher -->
+          <div class="admin-section" id="admin-sec-voucher">
+            <div class="admin-card">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h3 style="font-size:14px;">🎟️ Manajer Voucher & Diskon</h3>
+                <button class="btn-action-fill" onclick="alert('Buka Form Tambah Voucher')">+ Tambah Voucher</button>
+              </div>
+              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-color); padding:6px 0;">
+                <span>Diskon 10% (Persentase 10%)</span>
+                <span style="color:var(--secondary); font-weight:700;">AKTIF</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-color); padding:6px 0;">
+                <span>Owner Gratis (Persentase 100%)</span>
+                <span style="color:var(--secondary); font-weight:700;">AKTIF</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-color); padding:6px 0;">
+                <span>Potongan 5rb (Nominal Rp5.000)</span>
+                <span style="color:var(--secondary); font-weight:700;">AKTIF</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Admin Tab 5: Staf / Karyawan -->
+          <div class="admin-section" id="admin-sec-staf">
+            <div class="admin-card">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h3 style="font-size:14px;">👥 Manajemen Staf & Karyawan</h3>
+                <button class="btn-action-fill" onclick="alert('Buka Form Tambah Staf Baru')">+ Tambah Staf</button>
+              </div>
+              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-color); padding:6px 0;">
+                <span>👤 Andi (Shift Kasir)</span>
+                <span style="color:var(--secondary); font-weight:700;">AKTIF</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-color); padding:6px 0;">
+                <span>👤 Budi (Shift Kasir)</span>
+                <span style="color:var(--secondary); font-weight:700;">AKTIF</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-color); padding:6px 0;">
+                <span>👤 Citra (Shift Kasir)</span>
+                <span style="color:var(--secondary); font-weight:700;">AKTIF</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+    <!-- MODAL POPUP VARIANT SHEET -->
+    <div class="modal-overlay" id="variantModal">
+      <div class="variant-sheet-card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <h3 id="modalMenuName" style="font-size:16px; font-weight:700;">Kopi Susu Senyawa</h3>
+            <p id="modalMenuPrice" style="font-size:13px; color:var(--secondary); font-weight:700;">Rp13.000</p>
+          </div>
+          <button style="background:none; border:none; font-size:18px; cursor:pointer;" onclick="closeVariantModal()">✖</button>
+        </div>
+
+        <div>
+          <div class="variant-group-title">Suhu (Pilihan)</div>
+          <div style="display:flex; gap:8px;">
+            <div class="opt-chip active" onclick="selectOpt(this)">ICE (Dingin)</div>
+            <div class="opt-chip" onclick="selectOpt(this)">HOT (Panas)</div>
+          </div>
+        </div>
+
+        <div>
+          <div class="variant-group-title">Tingkat Gula (Sugar)</div>
+          <div style="display:flex; gap:8px;">
+            <div class="opt-chip active" onclick="selectOpt(this)">Normal Sugar</div>
+            <div class="opt-chip" onclick="selectOpt(this)">Less Sugar</div>
+          </div>
+        </div>
+
+        <div>
+          <div class="variant-group-title">Espresso Shot</div>
+          <div style="display:flex; gap:8px;">
+            <div class="opt-chip active" onclick="selectOpt(this)">Normal Shot</div>
+            <div class="opt-chip" onclick="selectOpt(this)">2 Shot (+Rp3.000)</div>
+            <div class="opt-chip" onclick="selectOpt(this)">3 Shot (+Rp5.000)</div>
+          </div>
+        </div>
+
+        <button style="background:var(--secondary); color:white; border:none; padding:12px; border-radius:10px; font-weight:700; font-size:14px; cursor:pointer; margin-top:6px;" onclick="confirmAddVariant()">➕ TAMBAHKAN KE KERANJANG</button>
+      </div>
+    </div>
+
+    <!-- Bottom Navigation Bar -->
+    <div class="bottom-nav">
+      <div class="nav-item active" id="nav-kasir" onclick="switchNav('kasir')">
+        <span class="nav-icon">🧾</span>
+        <span>Kasir</span>
+      </div>
+      <div class="nav-item" id="nav-recap" onclick="switchNav('recap')">
+        <span class="nav-icon">📊</span>
+        <span>Rekap</span>
+      </div>
+      <div class="nav-item" id="nav-absen" onclick="switchNav('absen')">
+        <span class="nav-icon">⏰</span>
+        <span>Absen</span>
+      </div>
+      <div class="nav-item" id="nav-admin" onclick="switchNav('admin')">
+        <span class="nav-icon">🔓</span>
+        <span>Admin</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const menus = [
+      { name: 'Americano', price: 13000, cat: 'KOPI', hasVariant: true },
+      { name: 'Kopi Susu Senyawa', price: 13000, cat: 'KOPI', hasVariant: true },
+      { name: 'Kopi Susu Gula Aren', price: 15000, cat: 'KOPI', hasVariant: true },
+      { name: 'Kopi Susu Oat', price: 15000, cat: 'KOPI', hasVariant: true },
+      { name: 'Kopi Susu Butterscotch', price: 15000, cat: 'KOPI', hasVariant: true },
+      { name: 'Indomie Goreng', price: 12000, cat: 'MAKANAN', hasVariant: false }
+    ];
+
+    let cart = [
+      { name: 'Kopi Susu Senyawa (ICE, Normal)', price: 13000, qty: 1 }
+    ];
+    let selectedMenuItem = null;
+    const cashiers = ['Andi', 'Budi', 'Citra'];
+    let currentCashierIdx = 0;
+
+    function renderMenu() {
+      const grid = document.getElementById('menuGrid');
+      grid.innerHTML = '';
+      const query = document.getElementById('searchInput').value.toLowerCase();
+
+      menus.forEach(m => {
+        if (query && !m.name.toLowerCase().includes(query)) return;
+
+        const card = document.createElement('div');
+        card.className = 'menu-card';
+        card.onclick = () => openMenu(m);
+        card.innerHTML = `
+          <span class="menu-cat">${m.cat}</span>
+          <div class="menu-name">${m.name}</div>
+          <div class="menu-card-bottom">
+            <div class="menu-price">Rp${m.price.toLocaleString('id-ID')}</div>
+            <span style="font-size:9.5px; color:var(--primary); font-weight:700;">${m.hasVariant ? '🎛️ Varian' : '➕ Instan'}</span>
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    function openMenu(m) {
+      if (m.hasVariant) {
+        selectedMenuItem = m;
+        document.getElementById('modalMenuName').innerText = m.name;
+        document.getElementById('modalMenuPrice').innerText = 'Rp' + m.price.toLocaleString('id-ID');
+        document.getElementById('variantModal').classList.add('active');
+      } else {
+        addToCart(m.name, m.price);
+      }
+    }
+
+    function closeVariantModal() {
+      document.getElementById('variantModal').classList.remove('active');
+    }
+
+    function selectOpt(el) {
+      const parent = el.parentElement;
+      parent.querySelectorAll('.opt-chip').forEach(c => c.classList.remove('active'));
+      el.classList.add('active');
+    }
+
+    function confirmAddVariant() {
+      if (selectedMenuItem) {
+        addToCart(selectedMenuItem.name + ' (ICE, Normal)', selectedMenuItem.price);
+        closeVariantModal();
+      }
+    }
+
+    function renderCart() {
+      const cartList = document.getElementById('cartList');
+      cartList.innerHTML = '';
+      let total = 0;
+      let itemsCount = 0;
+
+      cart.forEach((item, idx) => {
+        total += item.price * item.qty;
+        itemsCount += item.qty;
+
+        const div = document.createElement('div');
+        div.className = 'cart-item';
+        div.innerHTML = `
+          <div class="cart-item-info">
+            <h4>${item.name}</h4>
+            <p>Rp${(item.price * item.qty).toLocaleString('id-ID')}</p>
+          </div>
+          <div class="stepper">
+            <div class="btn-step" onclick="updateQty(${idx}, -1)">-</div>
+            <span class="qty-text">${item.qty}</span>
+            <div class="btn-step" onclick="updateQty(${idx}, 1)">+</div>
+          </div>
+        `;
+        cartList.appendChild(div);
+      });
+
+      document.getElementById('itemCount').innerText = itemsCount;
+      document.getElementById('subtotalText').innerText = 'Rp' + total.toLocaleString('id-ID');
+      document.getElementById('totalPrice').innerText = 'Rp' + total.toLocaleString('id-ID');
+    }
+
+    function addToCart(name, price) {
+      const exist = cart.find(i => i.name === name);
+      if (exist) {
+        exist.qty += 1;
+      } else {
+        cart.push({ name, price, qty: 1 });
+      }
+      renderCart();
+    }
+
+    function updateQty(idx, delta) {
+      cart[idx].qty += delta;
+      if (cart[idx].qty <= 0) {
+        cart.splice(idx, 1);
+      }
+      renderCart();
+    }
+
+    function clearCart() {
+      cart = [];
+      renderCart();
+    }
+
+    function setOrderType(el) {
+      document.querySelectorAll('.btn-type').forEach(b => b.classList.remove('active'));
+      el.classList.add('active');
+    }
+
+    function switchNav(tabName) {
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      document.querySelectorAll('.view-panel').forEach(v => v.classList.remove('active'));
+
+      const targetNav = document.getElementById('nav-' + tabName);
+      const targetView = document.getElementById('view-' + tabName);
+
+      if (targetNav && targetView) {
+        targetNav.classList.add('active');
+        targetView.classList.add('active');
+      }
+    }
+
+    function switchAdminTab(el, secName) {
+      document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.admin-section').forEach(s => s.classList.remove('active'));
+
+      el.classList.add('active');
+      document.getElementById('admin-sec-' + secName).classList.add('active');
+    }
+
+    function toggleShiftBtn(el, empName, shiftName) {
+      el.classList.toggle('present');
+      if (el.classList.contains('present')) {
+        el.innerText = `☀️ Shift ${shiftName} ✓`;
+        alert(`✓ ${empName} dicatat masuk shift ${shiftName} & disinkron ke Google Sheet`);
+      } else {
+        el.innerText = `☀️ Shift ${shiftName}`;
+        alert(`Status shift ${shiftName} ${empName} diperbarui`);
+      }
+    }
+
+    function selectCashier() {
+      currentCashierIdx = (currentCashierIdx + 1) % cashiers.length;
+      const name = cashiers[currentCashierIdx];
+      document.getElementById('activeCashierName').innerText = name;
+      document.getElementById('headerCashierName').innerText = name;
+    }
+
+    function checkout() {
+      alert('Transaksi Berhasil Diproses & Struk Dicetak!');
+      clearCart();
+    }
+
+    // Init
+    renderMenu();
+    renderCart();
+  </script>
+</body>
+</html>
