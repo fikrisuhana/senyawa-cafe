@@ -20,6 +20,7 @@ class PosProvider extends ChangeNotifier {
   VoucherModel? _selectedVoucher;
   int _cashReceived = 0;
   bool _isLoading = true;
+  List<String> _shifts = ['Pagi', 'Sore']; // daftar shift (dari Sheet tab Setup)
 
   Timer? _syncTimer;
   DateTime _lastSyncTime = DateTime.now();
@@ -51,6 +52,7 @@ class PosProvider extends ChangeNotifier {
   int get cashReceived => _cashReceived;
   bool get isLoading => _isLoading;
   bool get isSyncing => _isSyncing;
+  List<String> get shifts => _shifts;
 
   String get syncStatusText {
     if (!_googleConnected) return 'Lokal · Google belum tersambung';
@@ -146,9 +148,15 @@ class PosProvider extends ChangeNotifier {
         await svc.pullMenuFromSheet(targetSheetId);
         try {
           await svc.pullEmployees(targetSheetId);
-          await svc.pullAttendance(targetSheetId);
+          // Pull daftar shift dulu (dipakai normalisasi absen backward-compat).
+          final newShifts = await svc.pullShifts(targetSheetId);
+          if (newShifts.isNotEmpty && !_listEq(newShifts, _shifts)) {
+            _shifts = newShifts;
+            notifyListeners();
+          }
+          await svc.pullAttendance(targetSheetId, validShifts: _shifts);
         } catch (e) {
-          debugPrint('Pull karyawan/absen dari Sheet gagal: $e');
+          debugPrint('Pull karyawan/absen/shift dari Sheet gagal: $e');
         }
         await loadCatalog();
 
@@ -410,6 +418,15 @@ class PosProvider extends ChangeNotifier {
     await db.voidTransaction(trxId, reason);
     await loadCatalog();
     notifyListeners();
+    return true;
+  }
+
+  /// Bandingkan 2 list string (urutan penting). Dipakai cek apakah shifts berubah.
+  bool _listEq(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
     return true;
   }
 

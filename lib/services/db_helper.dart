@@ -669,6 +669,49 @@ class DbHelper {
     return db.query('attendances', where: 'business_date = ?', whereArgs: [businessDate]);
   }
 
+  /// Set 1 shift utk 1 karyawan di 1 hari (aturan: 1 org = 1 shift/hari).
+  /// Hapus semua absen org+tgl lama → catat shift baru. Shift='' = batal (hapus doang).
+  Future<void> setEmployeeShiftAttendance(String employeeName, String businessDate, String shift) async {
+    final db = await database;
+    await db.delete('attendances',
+        where: 'employee_name = ? AND business_date = ?',
+        whereArgs: [employeeName, businessDate]);
+    if (shift.isNotEmpty) {
+      await db.insert('attendances', {
+        'employee_name': employeeName,
+        'business_date': businessDate,
+        'shift': shift,
+        'created_at': DateTime.now().toIso8601String(),
+        'synced': 0,
+      });
+    }
+  }
+
+  /// Ambil shift 1 karyawan di 1 hari (string, '' kalau belum absen).
+  Future<String> getEmployeeShiftToday(String employeeName, String businessDate) async {
+    final db = await database;
+    final res = await db.query('attendances',
+        where: 'employee_name = ? AND business_date = ?',
+        whereArgs: [employeeName, businessDate],
+        limit: 1);
+    if (res.isEmpty) return '';
+    return (res.first['shift'] ?? '').toString();
+  }
+
+  /// Ambil map { employeeName: shift } untuk 1 hari (utk UI absen).
+  Future<Map<String, String>> getShiftMapForDate(String businessDate) async {
+    final db = await database;
+    final res = await db.query('attendances',
+        where: 'business_date = ?', whereArgs: [businessDate]);
+    final map = <String, String>{};
+    for (final r in res) {
+      final name = (r['employee_name'] ?? '').toString();
+      final shift = (r['shift'] ?? '').toString();
+      if (name.isNotEmpty && shift.isNotEmpty) map[name] = shift;
+    }
+    return map;
+  }
+
   // ---------------- KAS / CASH ENTRIES ----------------
   Future<void> insertCashEntry({
     required String type, // IN | OUT

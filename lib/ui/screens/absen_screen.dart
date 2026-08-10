@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../providers/pos_provider.dart';
 import '../../services/db_helper.dart';
 import '../../services/google_sheet_service.dart';
 
@@ -13,12 +15,17 @@ class AbsenScreen extends StatefulWidget {
 
 class _AbsenScreenState extends State<AbsenScreen> {
   List<Map<String, dynamic>> _employees = [];
-  Set<String> _presentToday = {}; // nama karyawan yg hadir hari ini
+  /// Map nama karyawan → shift yg dipilih hari ini ('' = belum absen).
+  Map<String, String> _shiftToday = {};
   bool _isLoading = true;
+  late String _bDateKey;
 
   @override
   void initState() {
     super.initState();
+    final now = DateTime.now();
+    final bDate = now.hour < 6 ? now.subtract(const Duration(days: 1)) : now;
+    _bDateKey = DateFormat('yyyy-MM-dd').format(bDate);
     _loadAbsenData();
   }
 
@@ -26,7 +33,6 @@ class _AbsenScreenState extends State<AbsenScreen> {
     setState(() => _isLoading = true);
     final db = DbHelper();
 
-    // Default employees if empty
     var emps = await db.getEmployees();
     if (emps.isEmpty) {
       await db.insertEmployee('Andi');
@@ -34,112 +40,95 @@ class _AbsenScreenState extends State<AbsenScreen> {
       await db.insertEmployee('Citra');
       emps = await db.getEmployees();
     }
-
-    final now = DateTime.now();
-    final bDate = now.hour < 6 ? now.subtract(const Duration(days: 1)) : now;
-    final bDateKey = DateFormat('yyyy-MM-dd').format(bDate);
-
-    final atts = await db.getTodayAttendances(bDateKey);
-    // Hadir = ada baris absen (apa pun shift-nya: Pagi/Sore/Hadir/Y lama).
-    final present = <String>{};
-    for (final row in atts) {
-      final name = (row['employee_name'] ?? '').toString();
-      if (name.isNotEmpty) present.add(name);
-    }
+    final shiftMap = await db.getShiftMapForDate(_bDateKey);
 
     if (mounted) {
       setState(() {
         _employees = emps;
-        _presentToday = present;
+        _shiftToday = shiftMap;
         _isLoading = false;
       });
     }
   }
 
-  Future<void> _toggleHadir(String empName) async {
-    final now = DateTime.now();
-    final bDate = now.hour < 6 ? now.subtract(const Duration(days: 1)) : now;
-    final bDateKey = DateFormat('yyyy-MM-dd').format(bDate);
+  /// Toggle karyawan di shift tertentu.
+  /// Kalau karyawan SUDAH di shift ini → batal (set '').
+  /// Kalau karyawan di shift LAIN → pindah ke shift ini (aturan 1 org 1 shift).
+  Future<void> _toggleShift(String empName, String shift) async {
+    final current = _shiftToday[empName] ?? '';
+    final newShift = (current == shift) ? '' : shift;
 
-    final bool wasPresent = _presentToday.contains(empName);
-    if (!wasPresent) {
-      // Tandai HADIR → catat (dedup anti dobel) + sync ke Sheet.
-      await DbHelper().recordAttendance(empName, bDateKey, 'Hadir');
-      await DbHelper().updateEmployeeShift(empName, 'Hadir');
+    // Update lokal (atomic: 1 org 1 shift).
+    await DbHelper().setEmployeeShiftAttendance(empName, _bDateKey, newShift);
+    await DbHelper().updateEmployeeShift(empName, newShift);
 
-      final prefs = await SharedPreferences.getInstance();
-      final sheetId = prefs.getString('spreadsheet_id') ?? '';
-      if (sheetId.isNotEmpty) {
-        try {
-          // Pastikan service terhubung dulu (instance singleton bisa _api null
-          // kalau app baru buka & belum pernah sync).
-          final svc = GoogleSheetService();
-          if (!svc.isConnected) {
-            await svc.signIn(interactive: false);
-          }
-          await svc.appendAttendance(sheetId, bDateKey, empName, true);
-          // Segarkan matriks absen di Sheet biar langsung ke-lihat.
-          await svc.pushAbsensiMatriks(sheetId);
-        } catch (e) {
-          debugPrint('Append absensi ke Sheet gagal: $e');
-        }
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('✓ $empName ditandai hadir & disinkron ke Sheet')),
-        );
-      }
-    } else {
-      // Batal hadir → hapus record (di app & abaikan di Sheet, append-only).
-      await DbHelper().removeAttendance(empName, bDateKey, 'Hadir');
-      await DbHelper().updateEmployeeShift(empName, '');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Kehadiran $empName dibatalkan')),
-        );
+    // Sync ke Sheet.
+    final prefs = await SharedPreferences.getInstance();
+    final sheetId = prefs.getString('spreadsheet_id') ?? '';
+    if (sheetId.isNotEmpty) {
+      try {
+        final svc = GoogleSheetService();
+        if (!svc.isConnected) await svc.signIn(interactive: false);
+        await svc.appendAttendance(sheetId, _bDateKey, empName, newShift);
+        await svc.pushAbsensiMatriks(sheetId);
+      } catch (e) {
+        debugPrint('Sync absen ke Sheet gagal: $e');
       }
     }
 
     setState(() {
-      if (wasPresent) {
-        _presentToday.remove(empName);
+      if (newShift.isEmpty) {
+        _shiftToday.remove(empName);
       } else {
-        _presentToday.add(empName);
+        _shiftToday[empName] = newShift;
       }
     });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(newShift.isEmpty
+            ? 'Absen $empName dibatalkan'
+            : '✓ $empName → shift $newShift')),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final pos = context.watch<PosProvider>();
+    final shifts = pos.shifts;
     final todayStr = DateFormat('EEEE, d MMM yyyy', 'id_ID').format(DateTime.now());
 
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator(color: Color(0xFF1A73E8)));
     }
 
-    final hadirCount = _employees.where((e) => _presentToday.contains(e['name'] as String)).length;
+    if (shifts.isEmpty) {
+      return const Center(child: Text('Daftar shift kosong. Atur di Spreadsheet (tab Setup).'));
+    }
 
-    return RefreshIndicator(
-      onRefresh: _loadAbsenData,
-      color: const Color(0xFF1A73E8),
-      child: SingleChildScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+    final hadirCount = _shiftToday.length;
+    final emps2 = _employees.where((e) => e['active'] == 1).toList();
+
+    return DefaultTabController(
+      length: shifts.length,
+      child: Column(
+        children: [
+          // Header + info hari.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+            child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Absensi Karyawan', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+                      const Text('Absensi per Shift', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
                       const SizedBox(height: 4),
                       Text(
-                        'Hari usaha: $todayStr',
-                        style: const TextStyle(fontSize: 12, color: Color(0xFF1A73E8)),
+                        '$todayStr • pilih tab shift, tap karyawan utk absen',
+                        style: const TextStyle(fontSize: 11, color: Color(0xFF1A73E8)),
                       ),
                     ],
                   ),
@@ -159,80 +148,97 @@ class _AbsenScreenState extends State<AbsenScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 6),
-            const Text(
-              'Ketuk kartu untuk tandai hadir. Daftar karyawan bisa diatur dari Admin atau Spreadsheet (tab Karyawan).',
-              style: TextStyle(fontSize: 11, color: Colors.grey),
+          ),
+          // TabBar shift (geser antar shift).
+          TabBar(
+            isScrollable: true,
+            labelColor: const Color(0xFF1A73E8),
+            unselectedLabelColor: Colors.grey,
+            indicatorColor: const Color(0xFF1A73E8),
+            tabs: shifts.map((s) => Tab(text: s)).toList(),
+          ),
+          // List karyawan per shift.
+          Expanded(
+            child: TabBarView(
+              children: shifts.map((shift) => _buildShiftList(shift, emps2)).toList(),
             ),
-            const SizedBox(height: 16),
+          ),
+        ],
+      ),
+    );
+  }
 
-            // Daftar karyawan — kartu tap-to-toggle hadir.
-            ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: _employees.length,
-              itemBuilder: (context, index) {
-                final emp = _employees[index];
-                final empName = emp['name'] as String;
-                final isActive = (emp['active'] == 1);
-                final bool isPresent = _presentToday.contains(empName);
+  Widget _buildShiftList(String shift, List<Map<String, dynamic>> emps) {
+    final inThisShift = emps.where((e) => (_shiftToday[e['name'] as String] ?? '') == shift).length;
+    return RefreshIndicator(
+      onRefresh: _loadAbsenData,
+      color: const Color(0xFF1A73E8),
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Text('Shift $shift — $inThisShift orang',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF7A5540))),
+          const SizedBox(height: 10),
+          ...emps.map((emp) {
+            final empName = emp['name'] as String;
+            final currentShift = _shiftToday[empName] ?? '';
+            final bool inThis = currentShift == shift;
+            final bool inOther = currentShift.isNotEmpty && currentShift != shift;
 
-                return Card(
-                  elevation: 1,
-                  margin: const EdgeInsets.only(bottom: 10),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    side: BorderSide(
-                      color: isPresent ? const Color(0xFF356A58) : Colors.transparent,
-                      width: isPresent ? 1.5 : 0,
-                    ),
-                  ),
-                  color: isPresent ? const Color(0xFFEAF7F1) : Colors.white,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(14),
-                    onTap: isActive ? () => _toggleHadir(empName) : null,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                      child: Row(
-                        children: [
-                          CircleAvatar(
-                            backgroundColor: isPresent ? const Color(0xFF356A58) : const Color(0xFFF5F3F0),
-                            child: Icon(
-                              isPresent ? Icons.check : Icons.person_outline,
-                              color: isPresent ? Colors.white : const Color(0xFF7A5540),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(empName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                                Text(
-                                  isActive ? (isPresent ? 'Hadir hari ini' : 'Belum absen') : 'Nonaktif',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: isPresent ? const Color(0xFF356A58) : Colors.grey,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          // Toggle switch besar biar gampang di-tap.
-                          Switch(
-                            value: isPresent,
-                            activeThumbColor: const Color(0xFF356A58),
-                            onChanged: isActive ? (v) => _toggleHadir(empName) : null,
-                          ),
-                        ],
+            return Card(
+              elevation: 1,
+              margin: const EdgeInsets.only(bottom: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: BorderSide(
+                  color: inThis ? const Color(0xFF356A58) : Colors.transparent,
+                  width: inThis ? 1.5 : 0,
+                ),
+              ),
+              color: inThis ? const Color(0xFFEAF7F1) : (inOther ? const Color(0xFFF5F3F0) : Colors.white),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () => _toggleShift(empName, shift),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        backgroundColor: inThis ? const Color(0xFF356A58) : const Color(0xFFE0E0E0),
+                        child: Icon(
+                          inThis ? Icons.check : Icons.person_outline,
+                          color: inThis ? Colors.white : const Color(0xFF7A5540),
+                        ),
                       ),
-                    ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(empName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                            Text(
+                              inThis
+                                  ? 'Hadir shift $shift'
+                                  : (inOther ? 'Sudah di shift $currentShift (tap utk pindah)' : 'Belum absen'),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: inThis ? const Color(0xFF356A58) : (inOther ? Colors.orange : Colors.grey),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(
+                        inThis ? Icons.check_circle : (inOther ? Icons.swap_horiz : Icons.radio_button_unchecked),
+                        color: inThis ? const Color(0xFF356A58) : (inOther ? Colors.orange : Colors.grey),
+                      ),
+                    ],
                   ),
-                );
-              },
-            ),
-          ],
-        ),
+                ),
+              ),
+            );
+          }),
+        ],
       ),
     );
   }

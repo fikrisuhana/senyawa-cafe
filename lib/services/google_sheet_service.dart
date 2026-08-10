@@ -50,6 +50,7 @@ class GoogleSheetService {
     'Restok_Log': ['waktu', 'nama_bahan', 'jumlah_tambah', 'satuan', 'stok_akhir'],
     'Absensi': ['hari_usaha', 'karyawan', 'hadir', 'waktu'],
     'Karyawan': ['nama', 'aktif', 'shift_status'],
+    'Setup': ['key', 'value'],
     'Menu_Terlaris': ['menu', 'total_qty', 'total_omzet', 'qty_bulan_ini', 'omzet_bulan_ini'],
   };
 
@@ -326,6 +327,12 @@ class GoogleSheetService {
       await pushEmployees(id);
     } catch (e) {
       debugPrint('Push karyawan gagal: $e');
+    }
+    // Push tab Setup (default shifts) kalau belum ada.
+    try {
+      await pushSetup(id);
+    } catch (e) {
+      debugPrint('Push setup gagal: $e');
     }
 
     // Isi/segarkan tab laporan.
@@ -1003,13 +1010,11 @@ class GoogleSheetService {
         final dateStr = '$ym-${d.toString().padLeft(2, '0')}';
         final row = <Object?>[d];
         for (final name in emps) {
+          // Tampilkan shift yg ada utk org+tgl ini (TEXTJOIN semua nilai unik,
+          // exclude "Y"/"Hadir"/kosong backward-compat). Kalau kosong → sel kosong.
           row.add(
-            '=IF(OR('
-            'COUNTIFS(Absensi!A:A,"$dateStr",Absensi!B:B,"$name",Absensi!C:C,"Y")>0,'
-            'COUNTIFS(Absensi!A:A,"$dateStr",Absensi!B:B,"$name",Absensi!C:C,"Hadir")>0,'
-            'COUNTIFS(Absensi!A:A,"$dateStr",Absensi!B:B,"$name",Absensi!C:C,"Pagi")>0,'
-            'COUNTIFS(Absensi!A:A,"$dateStr",Absensi!B:B,"$name",Absensi!C:C,"Sore")>0'
-            '),"✓","")',
+            '=IFERROR(TEXTJOIN(", ",TRUE,UNIQUE(FILTER(Absensi!C2:C,'
+            '(Absensi!A2:A="$dateStr")*(Absensi!B2:B="$name")*(Absensi!C2:C<>"")*(Absensi!C2:C<>"Y")*(Absensi!C2:C<>"N")))),"")',
           );
         }
         values.add(row);
@@ -1172,15 +1177,16 @@ class GoogleSheetService {
   }
 
   /// Export / append 1 baris absensi ke tab Absensi di Google Sheet.
-  /// Format presence-only: hadir = 'Y' / tidak = 'N'.
-  Future<void> appendAttendance(String id, String businessDate, String employeeName, bool hadir) async {
+  /// Kolom: hari_usaha, karyawan, hadir(=nama shift), waktu.
+  /// Shift kosong ('') = batal/tidak hadir.
+  Future<void> appendAttendance(String id, String businessDate, String employeeName, String shift) async {
     if (_api == null) return;
     await _api!.spreadsheets.values.append(
       gs.ValueRange(values: [
         [
           businessDate,
           employeeName,
-          hadir ? 'Y' : 'N',
+          shift,
           DateTime.now().toIso8601String(),
         ]
       ]),
@@ -1400,39 +1406,106 @@ class GoogleSheetService {
     return n;
   }
 
+  /// Tulis tab Setup (key,value) — default shifts kalau kosong.
+  /// Owner bisa edit nilai 'shifts' di Sheet untuk atur daftar shift app.
+  Future<void> pushSetup(String id, {String defaultShifts = 'Pagi,Siang,Sore,Malam'}) async {
+    if (_api == null) return;
+    // Cek dulu apakah tab Setup sudah berisi.
+    List<List<Object?>> rows;
+    try {
+      final res = await _api!.spreadsheets.values.get(id, "'Setup'!A2:B100");
+      final existing = res.values ?? [];
+      // Kalau sudah ada baris 'shifts', pertahankan nilai owner.
+      if (existing.any((r) => r.isNotEmpty && r[0].toString() == 'shifts')) {
+        return; // jangan overwrite setting owner
+      }
+      rows = [
+        _tabs['Setup']!,
+        ['shifts', defaultShifts],
+      ];
+    } catch (_) {
+      rows = [
+        _tabs['Setup']!,
+        ['shifts', defaultShifts],
+      ];
+    }
+    await _writeTab(id, 'Setup', rows);
+    debugPrint('⚙️ Setup ditulis (shifts default: $defaultShifts).');
+  }
+
+  /// Baca daftar shift dari tab Setup (key='shifts', value='Pagi,Siang,...').
+  /// Dipakai app buat TabBar absen. Fallback default kalau tab/Sheet blom ada.
+  Future<List<String>> pullShifts(String id, {List<String> fallback = const ['Pagi', 'Sore']}) async {
+    if (_api == null) return fallback;
+    try {
+      final res = await _api!.spreadsheets.values.get(id, "'Setup'!A2:B100");
+      for (final r in res.values ?? <List<Object?>>[]) {
+        if (r.isNotEmpty && r[0].toString().trim() == 'shifts') {
+          final val = r.length > 1 ? r[1].toString() : '';
+          final list = val.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+          return list.isEmpty ? fallback : list;
+        }
+      }
+    } catch (e) {
+      debugPrint('Pull shifts gagal: $e');
+    }
+    return fallback;
+  }
+
   /// Pull absensi dari tab Absensi (Sheet) → SQLite, untuk bulan berjalan.
-  /// Owner bisa tandai hadir langsung di Sheet (kolom hadir = Y) → app ikut.
-  /// AMAN & IDEMPOTEN: hanya menAMBAH hadir (recordAttendance upsert).
-  /// Baris 'N'/kosong di Sheet TIDAK menghapus absen app (anti corrupt: kalau Sheet
-  /// sengaja dikosongkan/ Salah edit, data absen app tetap aman). Pembatalan absen
-  /// dilakukan di app (yg akan hapus record lokal + diabaikan Sheet append-only).
-  Future<int> pullAttendance(String id) async {
+  /// Pull absensi dari tab Absensi (Sheet) → SQLite.
+  /// Aturan 1 karyawan 1 shift/hari: ambil baris TERBARU per (karyawan, tanggal)
+  /// sebagai sumber kebenaran. Kalau baris terbaru shift kosong → anggap batal.
+  /// AMAN: tidak hapus data app kalau Sheet error/kosong.
+  Future<int> pullAttendance(String id, {List<String>? validShifts}) async {
     if (_api == null) return 0;
-    final res = await _api!.spreadsheets.values.get(id, "'Absensi'!A2:C");
+    final res = await _api!.spreadsheets.values.get(id, "'Absensi'!A2:D");
     final rows = res.values ?? [];
     final db = DbHelper();
-    // Cache nama karyawan valid (anti input salah di Sheet).
     final knownEmps = <String>{};
     for (final e in await db.getEmployees()) {
       knownEmps.add((e['name'] ?? '').toString());
     }
-    int n = 0;
+    // Map key "name|bDate" → {shift, waktu} terbaru.
+    final Map<String, _SheetAbsenRow> latest = {};
     for (final r in rows) {
       if (r.length < 3) continue;
       final bDate = r[0].toString().trim();
       final name = r[1].toString().trim();
-      final hadirFlag = r[2].toString().trim().toUpperCase();
-      // Validasi: tanggal format YYYY-MM-DD & karyawan dikenal.
-      if (name.isEmpty || !knownEmps.contains(name)) continue;
+      final shift = r[2].toString().trim();
+      final waktu = r.length > 3 ? r[3].toString() : '';
+      if (!knownEmps.contains(name)) continue;
       if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(bDate)) continue;
-      final bool hadir = hadirFlag == 'Y' || hadirFlag == 'TRUE' || hadirFlag == '1' || hadirFlag == '✓';
-      // Hanya catat HADIR. Tidak ada hapus otomatis (anti corrupt data app).
-      if (hadir) {
-        await db.recordAttendance(name, bDate, 'Hadir');
-        n++;
+      // Backward-compat: nilai Y/Hadir/✓ lama → anggap 'Pagi' (default).
+      String normShift = shift;
+      final up = shift.toUpperCase();
+      if (up == 'Y' || up == 'TRUE' || up == '1' || up == '✓' || up == 'HADIR') {
+        normShift = (validShifts != null && validShifts.isNotEmpty) ? validShifts.first : 'Pagi';
+      }
+      final key = '$name|$bDate';
+      final prev = latest[key];
+      if (prev == null || waktu.compareTo(prev.waktu) > 0) {
+        latest[key] = _SheetAbsenRow(shift: normShift, waktu: waktu);
       }
     }
-    debugPrint('⬇️ Pull absensi dari Sheet: $n baris hadir ditambahkan.');
+    int n = 0;
+    for (final entry in latest.entries) {
+      final parts = entry.key.split('|');
+      final name = parts[0];
+      final bDate = parts[1];
+      final shift = entry.value.shift;
+      // setEmployeeShiftAttendance: 1 org 1 shift. shift='' = batal/hapus.
+      await db.setEmployeeShiftAttendance(name, bDate, shift);
+      if (shift.isNotEmpty) n++;
+    }
+    debugPrint('⬇️ Pull absensi dari Sheet: ${latest.length} record (1 org 1 shift).');
     return n;
   }
+}
+
+/// Helper internal buat pullAttendance.
+class _SheetAbsenRow {
+  final String shift;
+  final String waktu;
+  _SheetAbsenRow({required this.shift, required this.waktu});
 }
