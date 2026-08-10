@@ -142,8 +142,14 @@ class PosProvider extends ChangeNotifier {
           await svc.appendTransactionItems(targetSheetId, trx.code, itemRows);
           await db.markTransactionSynced(trx.id);
         }
-        // Pull perubahan menu dari Sheet jika ada
+        // Pull perubahan menu & karyawan dari Sheet (2 arah: owner bisa edit di Sheet).
         await svc.pullMenuFromSheet(targetSheetId);
+        try {
+          await svc.pullEmployees(targetSheetId);
+          await svc.pullAttendance(targetSheetId);
+        } catch (e) {
+          debugPrint('Pull karyawan/absen dari Sheet gagal: $e');
+        }
         await loadCatalog();
 
         // Segarkan laporan Sheet: Dashboard + Rekap_Bulanan + Absensi_Matriks.

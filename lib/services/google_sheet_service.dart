@@ -44,11 +44,12 @@ class GoogleSheetService {
     'Varian': ['menu', 'grup', 'tipe', 'wajib', 'opsi', 'tambahan_harga', 'bahan_opsi', 'qty_opsi'],
     'Bahan': ['nama', 'satuan', 'stok_utama', 'stok_min', 'total_penambahan_stok', 'total_stok_tersedia'],
     'Voucher': ['nama', 'tipe', 'nilai', 'aktif', 'kuota', 'terpakai', 'berlaku_dari', 'berlaku_sampai'],
-    'Transaksi': ['kode', 'hari_usaha', 'waktu', 'kasir', 'tipe', 'metode', 'subtotal', 'diskon', 'voucher', 'total', 'status'],
+    'Transaksi': ['kode', 'hari_usaha', 'waktu', 'kasir', 'tipe', 'metode', 'subtotal', 'diskon', 'voucher', 'total', 'status', 'modal', 'laba'],
     'Transaksi_Item': ['kode_trx', 'menu', 'varian', 'qty', 'harga', 'subtotal'],
     'Kas': ['hari_usaha', 'tipe', 'nominal', 'kategori', 'catatan', 'oleh', 'waktu'],
     'Restok_Log': ['waktu', 'nama_bahan', 'jumlah_tambah', 'satuan', 'stok_akhir'],
-    'Absensi': ['hari_usaha', 'karyawan', 'shift', 'waktu'],
+    'Absensi': ['hari_usaha', 'karyawan', 'hadir', 'waktu'],
+    'Karyawan': ['nama', 'aktif', 'shift_status'],
   };
 
   bool get isConnected => _account != null && _api != null;
@@ -318,6 +319,13 @@ class GoogleSheetService {
           ]),
     ]);
     debugPrint('⬆️ Katalog terkirim ke Sheet: ${menus.length} menu, ${bahan.length} bahan, ${vouchers.length} voucher.');
+
+    // Push juga daftar karyawan (biar owner bisa lihat/edit di Sheet).
+    try {
+      await pushEmployees(id);
+    } catch (e) {
+      debugPrint('Push karyawan gagal: $e');
+    }
 
     // Isi/segarkan tab laporan.
     try {
@@ -816,8 +824,8 @@ class GoogleSheetService {
         '=SUMIFS(Transaksi!J:J,Transaksi!B:B,"$bm",Transaksi!F:F,"QRIS",Transaksi!K:K,"ACTIVE")', // qris
         '=SUMIFS(Transaksi!J:J,Transaksi!B:B,"$bm",Transaksi!F:F,"TRANSFER",Transaksi!K:K,"ACTIVE")', // transfer
         '=SUMIFS(Transaksi!H:H,Transaksi!B:B,"$bm",Transaksi!K:K,"ACTIVE")', // diskon
-        0, // modal (cost_total belum di-sync ke Sheet; sementara 0)
-        '=SUMIFS(Transaksi!J:J,Transaksi!B:B,"$bm",Transaksi!K:K,"ACTIVE")', // laba_kotor (omzet - modal, modal=0)
+        '=SUMIFS(Transaksi!L:L,Transaksi!B:B,"$bm",Transaksi!K:K,"ACTIVE")', // modal (kolom L cost_total)
+        '=SUMIFS(Transaksi!M:M,Transaksi!B:B,"$bm",Transaksi!K:K,"ACTIVE")', // laba_kotor (kolom M = total-modal)
         '=SUMIFS(Kas!C:C,Kas!A:A,"$bm*",Kas!B:B,"MASUK")', // kas_masuk
         '=SUMIFS(Kas!C:C,Kas!A:A,"$bm*",Kas!B:B,"KELUAR")', // kas_keluar
       ]);
@@ -877,8 +885,9 @@ class GoogleSheetService {
     await _api!.spreadsheets.batchUpdate(gs.BatchUpdateSpreadsheetRequest(requests: reqs), id);
   }
 
-  /// Tulis tab Absensi_Matriks: tanggal × karyawan-shift bulan berjalan.
-  /// Format: kolom = "<Nama>-Pagi", "<Nama>-Sore"; isi "P"/"S" via COUNTIFS ke tab Absensi.
+  /// Tulis tab Absensi_Matriks: tanggal × karyawan (1 kolom per orang), bulan berjalan.
+  /// Format presence-only: isi ✓ kalau hadir, kosong kalau tidak.
+  /// Sumber: tab Absensi (kolom hadir = Y). Backward-compat: shift Pagi/Sore lama dihitung hadir.
   Future<void> pushAbsensiMatriks(String id) async {
     if (_api == null) return;
     final emps = await _activeEmployeeNames();
@@ -888,11 +897,10 @@ class GoogleSheetService {
     final daysInMonth = DateTime(year, month + 1, 0).day;
     final ym = '$year-${month.toString().padLeft(2, '0')}';
 
-    // Header: tgl | <Nama>-Pagi | <Nama>-Sore | ...
+    // Header: tgl | <Nama> | <Nama> | ...
     final header = <Object?>['tgl'];
     for (final name in emps) {
-      header.add('$name-Pagi');
-      header.add('$name-Sore');
+      header.add(name);
     }
 
     final values = <List<Object?>>[header];
@@ -900,26 +908,25 @@ class GoogleSheetService {
       final dateStr = '$ym-${d.toString().padLeft(2, '0')}';
       final row = <Object?>[d];
       for (final name in emps) {
-        // Pagi → "P" kalau ada absen; Sore → "S".
-        row.add('=IF(COUNTIFS(Absensi!A:A,"$dateStr",Absensi!B:B,"$name",Absensi!C:C,"Pagi")>0,"P","")');
-        row.add('=IF(COUNTIFS(Absensi!A:A,"$dateStr",Absensi!B:B,"$name",Absensi!C:C,"Sore")>0,"S","")');
+        // Hadir kalau: ada baris Y baru (hadir=Y) ATAU ada absen lama (shift Pagi/Sore).
+        // COUNTIFS gabungan: hadir=Y, atau shift Pagi, atau shift Sore, atau shift Hadir.
+        row.add(
+          '=IF(OR('
+          'COUNTIFS(Absensi!A:A,"$dateStr",Absensi!B:B,"$name",Absensi!C:C,"Y")>0,'
+          'COUNTIFS(Absensi!A:A,"$dateStr",Absensi!B:B,"$name",Absensi!C:C,"Hadir")>0,'
+          'COUNTIFS(Absensi!A:A,"$dateStr",Absensi!B:B,"$name",Absensi!C:C,"Pagi")>0,'
+          'COUNTIFS(Absensi!A:A,"$dateStr",Absensi!B:B,"$name",Absensi!C:C,"Sore")>0'
+          '),"✓","")',
+        );
       }
       values.add(row);
     }
-    // Baris total hadir per karyawan-shift (COUNTA kolom).
+    // Baris TOTAL hadir per karyawan (COUNTA kolom ✓).
     final totalRow = <Object?>['TOTAL'];
-    for (final name in emps) {
-      // Hitung "P" di kolom Pagi & "S" di kolom Sore (kolom index dinamis).
-      totalRow.add('=COUNTA({colPagi}2:{colPagi}{last})');
-      totalRow.add('=COUNTA({colSore}2:{colSore}{last})');
-    }
-    // Ganti placeholder kolom: kolom Pagi untuk karyawan ke-i = 2 + i*2, Sore = 3 + i*2 (1-based).
     final lastRow = daysInMonth + 1;
     for (int i = 0; i < emps.length; i++) {
-      final colPagi = _colLetter(1 + i * 2); // header tgl di index 0 → Pagi i mulai index 1 (col B)
-      final colSore = _colLetter(2 + i * 2);
-      totalRow[1 + i * 2] = '=COUNTA(${colPagi}2:${colPagi}$lastRow)';
-      totalRow[2 + i * 2] = '=COUNTA(${colSore}2:${colSore}$lastRow)';
+      final col = _colLetter(1 + i); // karyawan ke-i mulai kolom B (index 1)
+      totalRow.add('=COUNTA(${col}2:${col}$lastRow)');
     }
     values.add(totalRow);
 
@@ -995,12 +1002,17 @@ class GoogleSheetService {
   /// Tambah 1 baris transaksi ke tab Transaksi (append).
   Future<void> appendTransaction(String id, Map<String, dynamic> t) async {
     if (_api == null) return;
+    // modal (cost_total) & laba = total − modal. Dikirim supaya Rekap_Bulanan akurat.
+    final int modal = (t['cost_total'] as num?)?.toInt() ?? 0;
+    final int total = (t['total_amount'] as num?)?.toInt() ?? 0;
+    final int laba = total - modal;
     await _api!.spreadsheets.values.append(
       gs.ValueRange(values: [
         [
           t['code'], t['business_date'], t['created_at'], t['cashier_name'],
           t['order_type'], t['payment_method'], t['subtotal'], t['discount_amount'],
           t['voucher_name'] ?? '', t['total_amount'], t['status'] ?? 'ACTIVE',
+          modal, laba,
         ]
       ]),
       id,
@@ -1049,14 +1061,15 @@ class GoogleSheetService {
   }
 
   /// Export / append 1 baris absensi ke tab Absensi di Google Sheet.
-  Future<void> appendAttendance(String id, String businessDate, String employeeName, String shift) async {
+  /// Format presence-only: hadir = 'Y' / tidak = 'N'.
+  Future<void> appendAttendance(String id, String businessDate, String employeeName, bool hadir) async {
     if (_api == null) return;
     await _api!.spreadsheets.values.append(
       gs.ValueRange(values: [
         [
           businessDate,
           employeeName,
-          shift,
+          hadir ? 'Y' : 'N',
           DateTime.now().toIso8601String(),
         ]
       ]),
@@ -1114,5 +1127,78 @@ class GoogleSheetService {
     }
     debugPrint('⬇️ Pull dari Sheet: $updated menu diperbarui.');
     return updated;
+  }
+
+  /// Push daftar karyawan dari app → tab Karyawan (merge: nama ada → skip, ga ada → tambah).
+  /// Setelah itu Sheet jadi source of truth daftar karyawan.
+  Future<void> pushEmployees(String id) async {
+    if (_api == null) return;
+    final emps = await _activeEmployeeNames();
+    final rows = <List<Object?>>[_tabs['Karyawan']!];
+    for (final name in emps) {
+      rows.add([name, 1, '']);
+    }
+    try {
+      await _api!.spreadsheets.values.clear(gs.ClearValuesRequest(), id, "'Karyawan'!A1:C200");
+    } catch (_) {}
+    await _api!.spreadsheets.values.update(
+      gs.ValueRange(values: rows), id, "'Karyawan'!A1", valueInputOption: 'RAW',
+    );
+    debugPrint('👥 Karyawan terkirim ke Sheet: ${emps.length} orang.');
+  }
+
+  /// Pull daftar karyawan dari tab Karyawan (Sheet) → SQLite (upsert).
+  /// Owner tambah/edit karyawan di Sheet → app ikut. Return jumlah diperbarui.
+  Future<int> pullEmployees(String id) async {
+    if (_api == null) return 0;
+    final res = await _api!.spreadsheets.values.get(id, "'Karyawan'!A2:C");
+    final rows = res.values ?? [];
+    final db = DbHelper();
+    int n = 0;
+    for (final r in rows) {
+      if (r.isEmpty) continue;
+      final name = r[0].toString().trim();
+      if (name.isEmpty) continue;
+      final active = r.length > 1 ? (r[1].toString() == '1' || r[1].toString().toLowerCase() == 'true') : true;
+      final shiftStatus = r.length > 2 ? r[2].toString() : '';
+      // Upsert: insert kalau baru, update shift_status kalau sudah ada.
+      await db.insertEmployee(name);
+      await db.updateEmployeeShift(name, shiftStatus);
+      if (!active) {
+        // Owner set aktif=0 di Sheet → tandai nonaktif di app.
+        final dbConn = await db.database;
+        await dbConn.update('employees', {'active': 0}, where: 'name = ?', whereArgs: [name]);
+      }
+      n++;
+    }
+    debugPrint('⬇️ Pull karyawan dari Sheet: $n orang.');
+    return n;
+  }
+
+  /// Pull absensi dari tab Absensi (Sheet) → SQLite, untuk bulan berjalan.
+  /// Owner bisa tandai hadir langsung di Sheet (kolom hadir = Y/N) → app ikut.
+  /// Return jumlah baris disinkronkan. Hanya isi 'Y' yang dicatat sebagai hadir.
+  Future<int> pullAttendance(String id) async {
+    if (_api == null) return 0;
+    // Ambil semua baris Absensi (A=hari_usaha, B=karyawan, C=hadir).
+    final res = await _api!.spreadsheets.values.get(id, "'Absensi'!A2:C");
+    final rows = res.values ?? [];
+    final db = DbHelper();
+    int n = 0;
+    for (final r in rows) {
+      if (r.length < 3) continue;
+      final bDate = r[0].toString();
+      final name = r[1].toString();
+      final hadirFlag = r[2].toString().trim().toUpperCase();
+      final bool hadir = hadirFlag == 'Y' || hadirFlag == 'TRUE' || hadirFlag == '1' || hadirFlag == '✓';
+      if (hadir) {
+        await db.recordAttendance(name, bDate, 'Hadir');
+      } else {
+        await db.removeAttendance(name, bDate, 'Hadir');
+      }
+      n++;
+    }
+    debugPrint('⬇️ Pull absensi dari Sheet: $n baris.');
+    return n;
   }
 }
