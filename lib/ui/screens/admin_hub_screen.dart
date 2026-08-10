@@ -5,6 +5,7 @@ import '../../models/models.dart';
 import '../../providers/pos_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../services/db_helper.dart';
+import '../../services/google_sheet_service.dart';
 import 'package:intl/intl.dart';
 import 'splash_setup_screen.dart';
 import 'receipt_screen.dart';
@@ -264,7 +265,7 @@ class _AdminHubScreenState extends State<AdminHubScreen> with SingleTickerProvid
                     ],
                   ),
                   const SizedBox(height: 4),
-                  const Text('PIN Master dapat diset bebas & tersinkron dengan Google Sheet.', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                  const Text('PIN Master disimpan lokal di perangkat ini (belum tersinkron ke Sheet).', style: TextStyle(fontSize: 11, color: Colors.grey)),
                 ],
               ),
             ),
@@ -286,7 +287,7 @@ class _AdminHubScreenState extends State<AdminHubScreen> with SingleTickerProvid
                       const Text('Tema Terang / Gelap'),
                       Switch(
                         value: widget.settings.isDarkMode,
-                        activeColor: const Color(0xFF7A5540),
+                        activeThumbColor: const Color(0xFF7A5540),
                         onChanged: (val) => widget.settings.toggleDarkMode(val),
                       ),
                     ],
@@ -595,7 +596,7 @@ class _AdminHubScreenState extends State<AdminHubScreen> with SingleTickerProvid
                     children: [
                       Switch(
                         value: v.active,
-                        activeColor: const Color(0xFF7A5540),
+                        activeThumbColor: const Color(0xFF7A5540),
                         onChanged: (val) async {
                           final updated = VoucherModel(
                             id: v.id,
@@ -878,6 +879,18 @@ class _AdminHubScreenState extends State<AdminHubScreen> with SingleTickerProvid
               final added = int.tryParse(qtyCtrl.text.trim()) ?? 0;
               if (added > 0 && pkg.id != null) {
                 await DbHelper().updatePackagingStock(pkg.id!, added);
+                // Catat ke tab Restok_Log di Google Sheet (kalau tersambung).
+                final prefs = await SharedPreferences.getInstance();
+                final sheetId = prefs.getString('spreadsheet_id') ?? '';
+                if (sheetId.isNotEmpty) {
+                  try {
+                    final finalStock = pkg.stock + added;
+                    await GoogleSheetService()
+                        .logRestokToSheet(sheetId, pkg.name, added, pkg.unit, finalStock);
+                  } catch (e) {
+                    debugPrint('Log restok ke Sheet gagal: $e');
+                  }
+                }
                 await widget.pos.syncCatalogUp();
                 if (mounted) {
                   Navigator.pop(context);
@@ -1041,7 +1054,7 @@ class _AdminHubScreenState extends State<AdminHubScreen> with SingleTickerProvid
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Tampilkan logo di struk', style: TextStyle(fontSize: 13)),
                   value: showLogo,
-                  activeColor: const Color(0xFF7A5540),
+                  activeThumbColor: const Color(0xFF7A5540),
                   onChanged: (v) => setDlgState(() => showLogo = v),
                 ),
                 const Text('Logo tampil di preview struk. Cetak logo ke printer thermal (bitmap) menyusul.', style: TextStyle(fontSize: 10, color: Colors.grey)),
@@ -1183,7 +1196,7 @@ class _AdminHubScreenState extends State<AdminHubScreen> with SingleTickerProvid
                 SwitchListTile(
                   title: const Text('Cetak Struk Otomatis Selesai Transaksi', style: TextStyle(fontSize: 13)),
                   value: autoP,
-                  activeColor: const Color(0xFF7A5540),
+                  activeThumbColor: const Color(0xFF7A5540),
                   onChanged: (val) => setDlgState(() => autoP = val),
                 ),
               ],

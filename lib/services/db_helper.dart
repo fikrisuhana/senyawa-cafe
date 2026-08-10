@@ -2,6 +2,13 @@ import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import '../models/models.dart';
 
+/// Konstanta tipe kas. Pakai Bahasa Indonesia supaya konsisten dengan
+/// header & rumus Dashboard di Google Sheet (MASUK / KELUAR).
+class CashType {
+  static const String in_ = 'MASUK';
+  static const String out = 'KELUAR';
+}
+
 class DbHelper {
   static final DbHelper _instance = DbHelper._internal();
   factory DbHelper() => _instance;
@@ -21,14 +28,14 @@ class DbHelper {
 
     return await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    // v1 → v2: dulu skema masih kasar → drop & recreate (reseed).
+    // v1 → v2: skema masih kasar → drop & recreate (reseed).
     if (oldVersion < 2) {
       final tables = [
         'packaging', 'menu_items', 'variant_groups', 'variant_options',
@@ -42,12 +49,46 @@ class DbHelper {
       await _onCreate(db, newVersion);
       return;
     }
-    // v2 → v3: tambah kolom modal transaksi TANPA hapus data (non-destruktif).
+    // v2 → v3: tambah kolom modal transaksi (non-destruktif).
     if (oldVersion < 3) {
       try {
         await db.execute('ALTER TABLE transactions ADD COLUMN cost_total INTEGER DEFAULT 0');
       } catch (_) {}
     }
+    // v3 → v4: konsistensi skema.
+    //  - Rename kolom menu_items.sortOrder (camelCase) → sort_order (snake_case).
+    //  - Buang duplikat data varian/resep sisa versi lama (sekali jalan saat upgrade).
+    if (oldVersion < 4) {
+      await _normalizeMenuItemsColumns(db);
+      await _dedupeVariantData(db);
+    }
+  }
+
+  /// v3→v4: rename `sortOrder` → `sort_order` di menu_items.
+  /// SQLite < 3.35 ga support RENAME COLUMN, jadi fallback: drop+add+copy.
+  Future<void> _normalizeMenuItemsColumns(Database db) async {
+    final cols = await db.rawQuery('PRAGMA table_info(menu_items)');
+    final hasCamel = cols.any((c) => c['name'] == 'sortOrder');
+    final hasSnake = cols.any((c) => c['name'] == 'sort_order');
+    if (!hasCamel) return; // sudah snake (DB baru) atau ga ada kolomnya
+
+    if (!hasSnake) {
+      await db.execute('ALTER TABLE menu_items ADD COLUMN sort_order INTEGER DEFAULT 0');
+    }
+    await db.execute('UPDATE menu_items SET sort_order = COALESCE(sortOrder, 0)');
+    // Catatan: drop column baru didukung SQLite 3.35+ (Android API 30+).
+    // Untuk amannya, bungkus try; kalau gagal, kolom lama tetap ada tapi ga dipakai.
+    try {
+      await db.execute('ALTER TABLE menu_items DROP COLUMN sortOrder');
+    } catch (_) {}
+  }
+
+  /// v3→v4: bersihkan duplikat varian/resep sisa insert tanpa UNIQUE versi lama.
+  Future<void> _dedupeVariantData(Database db) async {
+    await db.execute('DELETE FROM variant_groups WHERE id NOT IN (SELECT MIN(id) FROM variant_groups GROUP BY menu_name, group_name)');
+    await db.execute('DELETE FROM variant_options WHERE id NOT IN (SELECT MIN(id) FROM variant_options GROUP BY menu_name, group_name, option_name)');
+    await db.execute('DELETE FROM variant_option_stocks WHERE id NOT IN (SELECT MIN(id) FROM variant_option_stocks GROUP BY menu_name, group_name, option_name, packaging_name)');
+    await db.execute('DELETE FROM menu_stocks WHERE id NOT IN (SELECT MIN(id) FROM menu_stocks GROUP BY menu_name, packaging_name)');
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -63,7 +104,7 @@ class DbHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE, category TEXT,
         price INTEGER DEFAULT 0, cost INTEGER DEFAULT 0,
-        active INTEGER DEFAULT 1, sortOrder INTEGER DEFAULT 0
+        active INTEGER DEFAULT 1, sort_order INTEGER DEFAULT 0
       )''');
 
     await db.execute('''
@@ -151,7 +192,7 @@ class DbHelper {
   // ---------------- CATALOG ----------------
   Future<List<MenuItemModel>> getMenuItems() async {
     final db = await database;
-    final res = await db.query('menu_items', orderBy: 'sortOrder ASC, name ASC');
+    final res = await db.query('menu_items', orderBy: 'sort_order ASC, name ASC');
     return res.map((m) => MenuItemModel.fromMap(m)).toList();
   }
 
@@ -208,6 +249,112 @@ class DbHelper {
   Future<void> reducePackagingByName(String name, int qty) async {
     final db = await database;
     await db.rawUpdate('UPDATE packaging SET stock = stock - ? WHERE name = ?', [qty, name]);
+  }
+
+  /// Tambah stok bahan berdasar nama (dipakai saat void / batalkan transaksi).
+  Future<void> addPackagingByName(String name, int qty) async {
+    final db = await database;
+    await db.rawUpdate('UPDATE packaging SET stock = stock + ? WHERE name = ?', [qty, name]);
+  }
+
+  /// Ambil 1 baris packaging by name (null kalau ga ada). Dipakai buat cek stok.
+  Future<PackagingModel?> getPackagingByName(String name) async {
+    final db = await database;
+    final res = await db.query('packaging', where: 'name = ?', whereArgs: [name]);
+    if (res.isEmpty) return null;
+    return PackagingModel.fromMap(res.first);
+  }
+
+  /// Estimasi berapa porsi menu ini masih bisa dibuat berdasar stok bahan base.
+  /// Kembali null kalau menu tak punya resep (tidak terbatas / tak terukur).
+  /// Dipakai buat tampilan "sisa" di grid kasir.
+  Future<int?> estimateMenuPortions(String menuName) async {
+    final stocks = await getMenuStocks(menuName);
+    if (stocks.isEmpty) return null;
+    int? minPortions;
+    for (final row in stocks) {
+      final pkgName = (row['packaging_name'] ?? '').toString();
+      final qty = toInt(row['qty']);
+      if (qty <= 0 || pkgName.isEmpty) continue;
+      final pkg = await getPackagingByName(pkgName);
+      final available = pkg?.stock ?? 0;
+      final portions = available ~/ qty;
+      if (minPortions == null || portions < minPortions) {
+        minPortions = portions;
+      }
+    }
+    return minPortions;
+  }
+
+  /// Cek apakah semua bahan (resep base + bahan opsi varian) cukup untuk keranjang.
+  /// Kembali null kalau aman, atau pesan alasan stok kurang.
+  Future<String?> validateStockForCart(Iterable<CartItem> items) async {
+    // Akumulasi kebutuhan per bahan: { namaBahan: totalQty }
+    final Map<String, int> need = {};
+
+    for (final item in items) {
+      // Resep base menu.
+      final baseStocks = await getMenuStocks(item.menu.name);
+      for (final row in baseStocks) {
+        final pkg = (row['packaging_name'] ?? '').toString();
+        final qty = toInt(row['qty']) * item.quantity;
+        if (pkg.isNotEmpty) need[pkg] = (need[pkg] ?? 0) + qty;
+      }
+      // Bahan khusus tiap opsi varian terpilih.
+      for (final sv in item.selectedVariants) {
+        final optName = sv.replaceAll(RegExp(r'\(.*?\)'), '').trim();
+        final optStocks = await getOptionStocks(item.menu.name, optName);
+        for (final row in optStocks) {
+          final pkg = (row['packaging_name'] ?? '').toString();
+          final qty = toInt(row['qty']) * item.quantity;
+          if (pkg.isNotEmpty) need[pkg] = (need[pkg] ?? 0) + qty;
+        }
+      }
+    }
+
+    // Bandingkan kebutuhan vs stok tersedia.
+    final List<String> kurang = [];
+    for (final entry in need.entries) {
+      final pkg = await getPackagingByName(entry.key);
+      final available = pkg?.stock ?? 0;
+      if (available < entry.value) {
+        kurang.add('${entry.key} (butuh ${entry.value}, sisa $available)');
+      }
+    }
+    if (kurang.isEmpty) return null;
+    return 'Stok bahan kurang: ${kurang.join("; ")}';
+  }
+
+  /// Kembalikan stok bahan (base + opsi varian) untuk satu transaksi yang di-void.
+  /// Ambil item dari tabel transaction_items. Dipakai oleh voidTransaction.
+  Future<void> restoreStockForTransaction(String trxId) async {
+    final items = await getTransactionItems(trxId);
+    for (final item in items) {
+      final baseStocks = await getMenuStocks(item.menu.name);
+      for (final row in baseStocks) {
+        final pkg = (row['packaging_name'] ?? '').toString();
+        final qty = toInt(row['qty']) * item.quantity;
+        if (pkg.isNotEmpty) await addPackagingByName(pkg, qty);
+      }
+      for (final sv in item.selectedVariants) {
+        final optName = sv.replaceAll(RegExp(r'\(.*?\)'), '').trim();
+        final optStocks = await getOptionStocks(item.menu.name, optName);
+        for (final row in optStocks) {
+          final pkg = (row['packaging_name'] ?? '').toString();
+          final qty = toInt(row['qty']) * item.quantity;
+          if (pkg.isNotEmpty) await addPackagingByName(pkg, qty);
+        }
+      }
+    }
+  }
+
+  /// Ambil voucher yang dipakai sebuah transaksi (berdasar voucher_name). Null kalau tak pakai.
+  Future<VoucherModel?> getVoucherByName(String? name) async {
+    if (name == null || name.isEmpty) return null;
+    final db = await database;
+    final res = await db.query('vouchers', where: 'name = ?', whereArgs: [name]);
+    if (res.isEmpty) return null;
+    return VoucherModel.fromMap(res.first);
   }
 
   /// Bahan base sebuah menu (resep).
@@ -371,15 +518,6 @@ class DbHelper {
     return res.map((m) => VariantOptionModel.fromMap(m)).toList();
   }
 
-  /// Buang baris duplikat lama (sisa insert tanpa UNIQUE). Dipanggil sekali saat startup.
-  Future<void> cleanupDuplicateVariants() async {
-    final db = await database;
-    await db.execute('DELETE FROM variant_groups WHERE id NOT IN (SELECT MIN(id) FROM variant_groups GROUP BY menu_name, group_name)');
-    await db.execute('DELETE FROM variant_options WHERE id NOT IN (SELECT MIN(id) FROM variant_options GROUP BY menu_name, group_name, option_name)');
-    await db.execute('DELETE FROM variant_option_stocks WHERE id NOT IN (SELECT MIN(id) FROM variant_option_stocks GROUP BY menu_name, group_name, option_name, packaging_name)');
-    await db.execute('DELETE FROM menu_stocks WHERE id NOT IN (SELECT MIN(id) FROM menu_stocks GROUP BY menu_name, packaging_name)');
-  }
-
   // ---------------- VOUCHER ----------------
   Future<List<VoucherModel>> getVouchers({bool onlyActive = true}) async {
     final db = await database;
@@ -455,9 +593,9 @@ class DbHelper {
     final db = await database;
     final rows = await db.query('transaction_items', where: 'trx_id = ?', whereArgs: [trxId]);
     return rows.map((r) {
-      final menuName = r['name'] as String;
-      final price = r['price'] as int;
-      final qty = r['qty'] as int;
+      final menuName = (r['name'] ?? '').toString();
+      final price = toInt(r['price']);
+      final qty = toInt(r['qty']);
       final varsStr = (r['variants'] as String?) ?? '';
       final note = (r['note'] as String?) ?? '';
       final varsList = varsStr.isEmpty ? <String>[] : varsStr.split(', ');
@@ -502,8 +640,13 @@ class DbHelper {
         where: 'name = ?', whereArgs: [name]);
   }
 
+  /// Catat absen satu karyawan+shift per hari usaha (upsert: ga dobel kalau sudah ada).
   Future<void> recordAttendance(String employeeName, String businessDate, String shift) async {
     final db = await database;
+    final existing = await db.query('attendances',
+        where: 'employee_name = ? AND business_date = ? AND shift = ?',
+        whereArgs: [employeeName, businessDate, shift]);
+    if (existing.isNotEmpty) return; // sudah ada, jangan insert dobel
     await db.insert('attendances', {
       'employee_name': employeeName,
       'business_date': businessDate,
@@ -511,6 +654,14 @@ class DbHelper {
       'created_at': DateTime.now().toIso8601String(),
       'synced': 0,
     });
+  }
+
+  /// Hapus record absen satu karyawan+shift per hari usaha (dipakai saat un-toggle).
+  Future<void> removeAttendance(String employeeName, String businessDate, String shift) async {
+    final db = await database;
+    await db.delete('attendances',
+        where: 'employee_name = ? AND business_date = ? AND shift = ?',
+        whereArgs: [employeeName, businessDate, shift]);
   }
 
   Future<List<Map<String, dynamic>>> getTodayAttendances(String businessDate) async {
@@ -578,11 +729,11 @@ class DbHelper {
     }
 
     final cashInRows = await db.rawQuery(
-        "SELECT SUM(amount) as s FROM cash_entries WHERE business_date = ? AND type = 'IN'",
-        [businessDate]);
+      "SELECT SUM(amount) as s FROM cash_entries WHERE business_date = ? AND type = ?",
+      [businessDate, CashType.in_]);
     final cashOutRows = await db.rawQuery(
-        "SELECT SUM(amount) as s FROM cash_entries WHERE business_date = ? AND type = 'OUT'",
-        [businessDate]);
+      "SELECT SUM(amount) as s FROM cash_entries WHERE business_date = ? AND type = ?",
+      [businessDate, CashType.out]);
 
     int cashIn = (cashInRows.first['s'] as num?)?.toInt() ?? 0;
     int cashOut = (cashOutRows.first['s'] as num?)?.toInt() ?? 0;

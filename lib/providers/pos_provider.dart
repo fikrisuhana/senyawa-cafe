@@ -11,7 +11,7 @@ class PosProvider extends ChangeNotifier {
   List<MenuItemModel> _menuItems = [];
   List<PackagingModel> _packagings = [];
   List<VoucherModel> _vouchers = [];
-  List<CartItem> _cartItems = [];
+  final List<CartItem> _cartItems = [];
 
   String _searchQuery = '';
   String _selectedCategory = 'SEMUA';
@@ -24,6 +24,7 @@ class PosProvider extends ChangeNotifier {
   Timer? _syncTimer;
   DateTime _lastSyncTime = DateTime.now();
   bool _isSyncing = false;
+  bool _lastSyncFailed = false;
   String _activeCashier = 'Andi';
   bool _googleConnected = false; // true setelah login Google (fase terakhir)
   String? _checkoutError;
@@ -54,10 +55,12 @@ class PosProvider extends ChangeNotifier {
   String get syncStatusText {
     if (!_googleConnected) return 'Lokal · Google belum tersambung';
     if (_isSyncing) return 'Sinkron…';
+    if (_lastSyncFailed) return 'Sync gagal · ketuk untuk coba lagi';
     final diff = DateTime.now().difference(_lastSyncTime).inMinutes;
     if (diff <= 0) return 'Sinkron <1m lalu';
     return 'Sinkron ${diff}m lalu';
   }
+  bool get lastSyncFailed => _lastSyncFailed;
 
   PosProvider() {
     initData();
@@ -67,10 +70,9 @@ class PosProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
-    // Import seeder jika first boot
+    // Import seeder jika first boot. Dedup varian/resep lama sudah jalan
+    // di migration DB v3→v4 (lihat db_helper._onUpgrade).
     await SeedImporter.importSeederIfNeeded();
-    // Bersihkan duplikat varian/resep sisa versi lama (sekali jalan, aman).
-    await DbHelper().cleanupDuplicateVariants();
     await loadCatalog();
 
     final prefs = await SharedPreferences.getInstance();
@@ -96,7 +98,8 @@ class PosProvider extends ChangeNotifier {
 
   void _startPeriodicSync() {
     _syncTimer?.cancel();
-    // Auto-sync tiap 15 menit.
+    // Auto-sync tiap 15 menit HANYA kalau Google tersambung (hemat baterai/network).
+    if (!_googleConnected) return;
     _syncTimer = Timer.periodic(const Duration(minutes: 15), (_) => performSync());
   }
 
@@ -120,6 +123,11 @@ class PosProvider extends ChangeNotifier {
       if (!svc.isConnected) {
         await svc.signIn(interactive: false);
       }
+      if (!svc.isConnected) {
+        // Belum bisa login (mis. belum setup) → bukan error, cuma skip.
+        _lastSyncFailed = false;
+        return;
+      }
 
       final targetSheetId = await svc.ensureSpreadsheet();
 
@@ -136,8 +144,10 @@ class PosProvider extends ChangeNotifier {
       }
 
       _lastSyncTime = DateTime.now();
+      _lastSyncFailed = false;
     } catch (e) {
       debugPrint('Auto Sync Error: $e');
+      _lastSyncFailed = true;
     } finally {
       _isSyncing = false;
       notifyListeners();
@@ -295,6 +305,14 @@ class PosProvider extends ChangeNotifier {
       return null;
     }
 
+    // VALIDASI STOK: cek semua bahan (resep base + opsi varian) cukup.
+    final stockReason = await DbHelper().validateStockForCart(_cartItems);
+    if (stockReason != null) {
+      _checkoutError = stockReason;
+      notifyListeners();
+      return null;
+    }
+
     final String trxCode =
         'TRX-${DateFormat('yyyyMMdd').format(now)}-${now.millisecondsSinceEpoch.toString().substring(7)}';
     // Total modal/HPP = Σ (modal menu × qty) → buat hitung untung kotor di laporan.
@@ -323,14 +341,16 @@ class PosProvider extends ChangeNotifier {
     // Potong stok: bahan base menu + bahan khusus opsi varian terpilih
     for (final item in _cartItems) {
       for (final row in await db.getMenuStocks(item.menu.name)) {
-        await db.reducePackagingByName(
-            row['packaging_name'] as String, (row['qty'] as int) * item.quantity);
+        final pkg = (row['packaging_name'] ?? '').toString();
+        final qty = (row['qty'] as num).toInt() * item.quantity;
+        if (pkg.isNotEmpty) await db.reducePackagingByName(pkg, qty);
       }
       for (final sv in item.selectedVariants) {
-        final optName = sv.replaceAll(RegExp(r'\(.*\)'), '').trim();
+        final optName = sv.replaceAll(RegExp(r'\(.*?\)'), '').trim();
         for (final row in await db.getOptionStocks(item.menu.name, optName)) {
-          await db.reducePackagingByName(
-              row['packaging_name'] as String, (row['qty'] as int) * item.quantity);
+          final pkg = (row['packaging_name'] ?? '').toString();
+          final qty = (row['qty'] as num).toInt() * item.quantity;
+          if (pkg.isNotEmpty) await db.reducePackagingByName(pkg, qty);
         }
       }
     }
@@ -350,6 +370,20 @@ class PosProvider extends ChangeNotifier {
 
   Future<bool> voidTransaction(String trxId, String reason) async {
     final db = DbHelper();
+    // Kembalikan stok bahan yang tadi dipotong saat checkout.
+    await db.restoreStockForTransaction(trxId);
+    // Turunkan pemakaian voucher (kembalikan kuota).
+    final trxRows = await (await db.database)
+        .query('transactions', where: 'id = ?', whereArgs: [trxId]);
+    if (trxRows.isNotEmpty) {
+      final voucherName = (trxRows.first['voucher_name'] as String?) ?? '';
+      if (voucherName.isNotEmpty) {
+        final v = await db.getVoucherByName(voucherName);
+        if (v?.id != null) {
+          await db.incrementVoucherUsage(v!.id!, delta: -1);
+        }
+      }
+    }
     await db.voidTransaction(trxId, reason);
     await loadCatalog();
     notifyListeners();

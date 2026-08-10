@@ -200,7 +200,7 @@ class _PosScreenState extends State<PosScreen> {
     return Row(
       children: [
         Expanded(
-          flex: 14,
+          flex: 13,
           child: Column(
             children: [
               _buildSearchBar(pos),
@@ -211,7 +211,7 @@ class _PosScreenState extends State<PosScreen> {
           ),
         ),
         Expanded(
-          flex: 11,
+          flex: 10,
           child: Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -274,21 +274,31 @@ class _PosScreenState extends State<PosScreen> {
 
   Widget _buildMenuGrid(PosProvider pos, NumberFormat currencyFormatter) {
     final items = pos.filteredMenuItems;
-    final bool isTablet = MediaQuery.of(context).size.width >= 600;
+    final double width = MediaQuery.of(context).size.width;
+    // Tablet split-view: kanan ada panel → kolom menyesuaikan lebar kiri saja.
+    // HP: 2 kolom. Tablet kecil: 3. Tablet besar: 4.
+    int crossAxisCount = 2;
+    double childAspectRatio = 1.65;
+    if (width >= 900) {
+      crossAxisCount = 4;
+      childAspectRatio = 1.5;
+    } else if (width >= 600) {
+      crossAxisCount = 3;
+      childAspectRatio = 1.58;
+    }
 
     return GridView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: isTablet ? 3 : 2,
-        childAspectRatio: isTablet ? 1.58 : 1.65,
+        crossAxisCount: crossAxisCount,
+        childAspectRatio: childAspectRatio,
         crossAxisSpacing: 10,
         mainAxisSpacing: 10,
       ),
       itemCount: items.length,
       itemBuilder: (context, index) {
         final item = items[index];
-        final bool isLowStock = item.name.contains('Indomie');
-        
+
         // Hitung berapa item menu ini yang ada di keranjang
         final int inCart = pos.cartItems
             .where((c) => c.menu.name == item.name)
@@ -360,9 +370,20 @@ class _PosScreenState extends State<PosScreen> {
                             ),
                             const SizedBox(width: 4),
                           ],
-                          Text(
-                            isLowStock ? '⚠️ sisa 4' : 'sisa 298',
-                            style: TextStyle(fontSize: 10, color: isLowStock ? Colors.red : Colors.grey),
+                          // Estimasi porsi real dari stok bahan (bukan angka hardcode).
+                          FutureBuilder<int?>(
+                            future: DbHelper().estimateMenuPortions(item.name),
+                            builder: (ctx, snap) {
+                              if (!snap.hasData || snap.data == null) {
+                                return const Text('stok ∞', style: TextStyle(fontSize: 10, color: Colors.grey));
+                              }
+                              final portions = snap.data!;
+                              final isLow = portions <= 5;
+                              return Text(
+                                portions == 0 ? '⚠️ habis' : 'sisa $portions',
+                                style: TextStyle(fontSize: 10, color: isLow ? Colors.red : Colors.grey),
+                              );
+                            },
                           ),
                         ],
                       ),

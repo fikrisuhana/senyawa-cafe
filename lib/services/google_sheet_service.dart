@@ -2,8 +2,17 @@ import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:extension_google_sign_in_as_googleapis_auth/extension_google_sign_in_as_googleapis_auth.dart';
 import 'package:googleapis/sheets/v4.dart' as gs;
+import 'package:googleapis/drive/v3.dart' as gd;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'db_helper.dart';
+
+/// Model ringkas file Spreadsheet untuk dipilih di layar setup.
+class SheetFileInfo {
+  final String id;
+  final String name;
+  final DateTime? modifiedTime;
+  SheetFileInfo({required this.id, required this.name, this.modifiedTime});
+}
 
 /// Sinkronisasi lokal ↔ Google Sheet (owner).
 /// Spreadsheet auto-dibuat saat pertama login kalau belum ada.
@@ -20,9 +29,7 @@ class GoogleSheetService {
 
   GoogleSignInAccount? _account;
   gs.SheetsApi? _api;
-
-  bool get isConnected => _account != null && _api != null;
-  String get email => _account?.email ?? '';
+  gd.DriveApi? _driveApi;
 
   // Tab & header yang ditulis ke Sheet
   static const _tabs = <String, List<String>>{
@@ -39,14 +46,21 @@ class GoogleSheetService {
     'Kas': ['hari_usaha', 'tipe', 'nominal', 'kategori', 'catatan', 'oleh', 'waktu'],
   };
 
-  /// Login Google + siapkan API client.
+  bool get isConnected => _account != null && _api != null;
+  String get email => _account?.email ?? '';
+  String get displayName => _account?.displayName ?? '';
+
+  /// Login Google + siapkan API client (Sheets + Drive).
   Future<GoogleSignInAccount?> signIn({bool interactive = true}) async {
     _account = interactive
         ? await googleSignIn.signIn()
         : (await googleSignIn.signInSilently());
     if (_account == null) return null;
     final client = await googleSignIn.authenticatedClient();
-    if (client != null) _api = gs.SheetsApi(client);
+    if (client != null) {
+      _api = gs.SheetsApi(client);
+      _driveApi = gd.DriveApi(client);
+    }
     return _account;
   }
 
@@ -54,6 +68,66 @@ class GoogleSheetService {
     await googleSignIn.signOut();
     _account = null;
     _api = null;
+    _driveApi = null;
+  }
+
+  /// Daftar file Spreadsheet yang dimiliki/dibuat oleh akun ini (via Drive API).
+  /// Dipakai di layar setup: owner pilih file existing atau buat baru.
+  Future<List<SheetFileInfo>> listSpreadsheets() async {
+    if (_driveApi == null) return [];
+    final res = await _driveApi!.files.list(
+      q: "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
+      orderBy: 'modifiedByMeTime desc',
+      pageSize: 50,
+      $fields: 'files(id,name,modifiedTime)',
+    );
+    final files = res.files ?? [];
+    return files
+        .map((f) => SheetFileInfo(
+              id: f.id ?? '',
+              name: f.name ?? '(tanpa nama)',
+              modifiedTime: f.modifiedTime,
+            ))
+        .where((f) => f.id.isNotEmpty)
+        .toList();
+  }
+
+  /// Buat spreadsheet baru dengan nama tertentu, simpan ID-nya ke prefs,
+  /// isi semua tab + push katalog. Kembali ke SheetFileInfo.
+  Future<SheetFileInfo?> createSpreadsheetByName(String name) async {
+    if (_api == null) return null;
+    final prefs = await SharedPreferences.getInstance();
+    final created = await _api!.spreadsheets.create(gs.Spreadsheet(
+      properties: gs.SpreadsheetProperties(title: name, locale: 'en_US'),
+      sheets: _tabs.keys
+          .map((t) => gs.Sheet(properties: gs.SheetProperties(title: t)))
+          .toList(),
+    ));
+    final newId = created.spreadsheetId ?? '';
+    if (newId.isEmpty) return null;
+    await prefs.setString('spreadsheet_id', newId);
+    await _ensureTabsExist(newId);
+    await pushCatalog(newId);
+    debugPrint('📗 Spreadsheet baru dibuat: "$name" ($newId)');
+    return SheetFileInfo(id: newId, name: name);
+  }
+
+  /// Pakai spreadsheet existing (hasil pilih dari list). Simpan ID + isi tab
+  /// kalau perlu + push katalog kalau tab Menu masih kosong.
+  Future<void> useExistingSpreadsheet(String id, String name) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('spreadsheet_id', id);
+    await _ensureTabsExist(id);
+    if (await _menuTabEmpty(id)) {
+      await pushCatalog(id);
+    } else {
+      try {
+        await pushDashboard(id);
+      } catch (e) {
+        debugPrint('Dashboard gagal diisi: $e');
+      }
+    }
+    debugPrint('📎 Pakai Sheet existing: "$name" ($id)');
   }
 
   /// Pastikan spreadsheet ada. Kalau ID kosong → buat baru. Kalau tab Menu kosong → push katalog.
@@ -469,7 +543,29 @@ class GoogleSheetService {
     );
   }
 
-  /// Tarik harga/aktif menu dari Sheet → update SQLite (edit Sheet → app berubah).
+  /// Export / append 1 baris kas (MASUK/KELUAR) ke tab Kas di Google Sheet.
+  Future<void> appendKas(String id, String businessDate, String type, int amount,
+      {String category = '', String note = '', String by = ''}) async {
+    if (_api == null) return;
+    await _api!.spreadsheets.values.append(
+      gs.ValueRange(values: [
+        [
+          businessDate,
+          type, // MASUK / KELUAR
+          amount,
+          category,
+          note,
+          by,
+          DateTime.now().toIso8601String(),
+        ]
+      ]),
+      id,
+      "'Kas'!A1",
+      valueInputOption: 'RAW',
+    );
+  }
+
+  /// Tarik harga/modal/aktif/urutan menu dari Sheet → update SQLite (edit Sheet → app berubah).
   Future<int> pullMenuFromSheet(String id) async {
     if (_api == null) return 0;
     final res = await _api!.spreadsheets.values.get(id, "'Menu'!A2:F");
@@ -479,11 +575,16 @@ class GoogleSheetService {
     for (final r in rows) {
       if (r.isEmpty) continue;
       final name = r[0].toString();
+      if (name.isEmpty) continue;
       final price = r.length > 2 ? int.tryParse(r[2].toString()) : null;
+      final cost = r.length > 3 ? int.tryParse(r[3].toString()) : null;
       final active = r.length > 4 ? (r[4].toString() == '1' || r[4].toString().toLowerCase() == 'true') : null;
+      final sortOrder = r.length > 5 ? int.tryParse(r[5].toString()) : null;
       final data = <String, Object?>{};
       if (price != null) data['price'] = price;
+      if (cost != null) data['cost'] = cost;
       if (active != null) data['active'] = active ? 1 : 0;
+      if (sortOrder != null) data['sort_order'] = sortOrder;
       if (data.isNotEmpty) {
         updated += await db.update('menu_items', data, where: 'name = ?', whereArgs: [name]);
       }

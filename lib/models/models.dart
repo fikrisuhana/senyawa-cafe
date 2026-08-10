@@ -1,3 +1,11 @@
+/// Helper konversi nilai DB (num/int/dynamic) ke int aman tanpa crash.
+int toInt(dynamic v, [int def = 0]) {
+  if (v == null) return def;
+  if (v is int) return v;
+  if (v is num) return v.toInt();
+  return int.tryParse(v.toString()) ?? def;
+}
+
 /// Model Bahan & Kemasan (Packaging)
 class PackagingModel {
   final int? id;
@@ -19,8 +27,8 @@ class PackagingModel {
       id: map['id'],
       name: map['name'] ?? '',
       unit: map['unit'] ?? 'pcs',
-      stock: map['stock'] ?? 0,
-      minStock: map['min_stock'] ?? map['minStock'] ?? 0,
+      stock: toInt(map['stock']),
+      minStock: toInt(map['min_stock'] ?? map['minStock']),
     );
   }
 
@@ -60,10 +68,11 @@ class MenuItemModel {
       id: map['id'],
       name: map['name'] ?? '',
       category: map['category'] ?? 'KOPI',
-      price: map['price'] ?? 0,
-      cost: map['cost'] ?? 0,
+      price: (map['price'] as num?)?.toInt() ?? 0,
+      cost: (map['cost'] as num?)?.toInt() ?? 0,
       active: (map['active'] == 1 || map['active'] == true),
-      sortOrder: map['urutan'] ?? map['sortOrder'] ?? 0,
+      // Kompatibel dengan kolom snake_case (sort_order), camelCase lama, dan key seed JSON.
+      sortOrder: (map['sort_order'] ?? map['urutan'] ?? map['sortOrder'] ?? 0) as int,
     );
   }
 
@@ -75,7 +84,7 @@ class MenuItemModel {
       'price': price,
       'cost': cost,
       'active': active ? 1 : 0,
-      'sortOrder': sortOrder,
+      'sort_order': sortOrder,
     };
   }
 }
@@ -193,12 +202,12 @@ class VoucherModel {
       id: map['id'],
       name: map['name'] ?? '',
       type: map['type'] ?? 'PERCENT',
-      value: map['value'] ?? 0,
+      value: toInt(map['value']),
       active: (map['active'] == 1 || map['active'] == true),
-      kuota: map['kuota'],
-      usedCount: map['used_count'] ?? 0,
-      validFrom: (map['valid_from'] as String?)?.isEmpty == true ? null : map['valid_from'],
-      validUntil: (map['valid_until'] as String?)?.isEmpty == true ? null : map['valid_until'],
+      kuota: map['kuota'] == null ? null : toInt(map['kuota']),
+      usedCount: toInt(map['used_count']),
+      validFrom: (map['valid_from'] as String?)?.isEmpty == true ? null : map['valid_from'] as String?,
+      validUntil: (map['valid_until'] as String?)?.isEmpty == true ? null : map['valid_until'] as String?,
     );
   }
 

@@ -63,15 +63,20 @@ class _AbsenScreenState extends State<AbsenScreen> {
 
     final currentShifts = List<String>.from(_attendanceMap[empName] ?? []);
     if (!currentShifts.contains(shiftName)) {
+      // Toggle ON → catat absen (dedup anti dobel) + sync ke Sheet.
       currentShifts.add(shiftName);
       await DbHelper().recordAttendance(empName, bDateKey, shiftName);
       await DbHelper().updateEmployeeShift(empName, currentShifts.join(', '));
-      
-      // Export ke Google Sheet
+
+      // Export ke Google Sheet (fire-and-forget; idempoten karena append kasat manual).
       final prefs = await SharedPreferences.getInstance();
       final sheetId = prefs.getString('spreadsheet_id') ?? '';
       if (sheetId.isNotEmpty) {
-        GoogleSheetService().appendAttendance(sheetId, bDateKey, empName, shiftName);
+        try {
+          await GoogleSheetService().appendAttendance(sheetId, bDateKey, empName, shiftName);
+        } catch (e) {
+          debugPrint('Append absensi ke Sheet gagal: $e');
+        }
       }
 
       if (mounted) {
@@ -80,11 +85,13 @@ class _AbsenScreenState extends State<AbsenScreen> {
         );
       }
     } else {
+      // Toggle OFF → hapus record absen (biar konsisten) + update status.
       currentShifts.remove(shiftName);
+      await DbHelper().removeAttendance(empName, bDateKey, shiftName);
       await DbHelper().updateEmployeeShift(empName, currentShifts.join(', '));
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Status shift $shiftName $empName diperbarui')),
+          SnackBar(content: Text('Absen shift $shiftName $empName dibatalkan')),
         );
       }
     }

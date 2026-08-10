@@ -55,7 +55,7 @@ class SeedImporter {
           }
         }
 
-        // 3. Import VariantGroup
+        // 3. Import VariantGroup (ignore kalau sudah ada — idempoten)
         if (data['varianGrup'] != null) {
           for (var item in data['varianGrup']) {
             await txn.insert('variant_groups', {
@@ -64,11 +64,11 @@ class SeedImporter {
               'type': item['tipe'] ?? item['type'] ?? 'SINGLE',
               'required': (item['wajib'] == true || item['required'] == true) ? 1 : 0,
               'sort_order': item['urutan'] ?? 0,
-            });
+            }, conflictAlgorithm: ConflictAlgorithm.ignore);
           }
         }
 
-        // 4. Import VariantOption
+        // 4. Import VariantOption (ignore kalau sudah ada — idempoten)
         if (data['varianOpsi'] != null) {
           for (var item in data['varianOpsi']) {
             await txn.insert('variant_options', {
@@ -77,11 +77,11 @@ class SeedImporter {
               'option_name': item['opsi'] ?? item['name'],
               'price_delta': item['tambahan'] ?? item['priceDelta'] ?? 0,
               'sort_order': item['urutan'] ?? 0,
-            });
+            }, conflictAlgorithm: ConflictAlgorithm.ignore);
           }
         }
 
-        // 4b. Import MenuStock (resep bahan base)
+        // 4b. Import MenuStock (resep bahan base) — ignore kalau sudah ada
         final menuBahan = data['menuBahan'] ?? data['menu_bahan'];
         if (menuBahan != null) {
           for (var item in menuBahan) {
@@ -89,11 +89,11 @@ class SeedImporter {
               'menu_name': item['menu'],
               'packaging_name': item['bahan'],
               'qty': item['qty'] ?? 1,
-            });
+            }, conflictAlgorithm: ConflictAlgorithm.ignore);
           }
         }
 
-        // 4c. Import VariantOptionStock (bahan khusus per opsi, mis. Dingin->cup plastik)
+        // 4c. Import VariantOptionStock (bahan khusus per opsi) — ignore kalau sudah ada
         final varianBahan = data['varianBahan'] ?? data['varian_bahan'];
         if (varianBahan != null) {
           for (var item in varianBahan) {
@@ -103,7 +103,7 @@ class SeedImporter {
               'option_name': item['opsi'],
               'packaging_name': item['bahan'],
               'qty': item['qty'] ?? 1,
-            });
+            }, conflictAlgorithm: ConflictAlgorithm.ignore);
           }
         }
 

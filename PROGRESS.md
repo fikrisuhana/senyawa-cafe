@@ -16,6 +16,39 @@ Tujuan akhir: aplikasi Android local-first yang **mirror fungsi web `pos-cafe`**
 - Google login **ditambahkan paling akhir**; user review setelah itu.
 
 ## 🧾 Update log
+- **2026-08-10 (Bug-fix besar + redesign Splash & Tablet):**
+  1. **VALIDASI STOK saat checkout** (`pos_provider.checkout` → `DbHelper.validateStockForCart`):
+     akumulasi kebutuhan semua bahan (resep base + opsi varian) → tolak transaksi kalau ada
+     bahan kurang, kasih alasan "Stok bahan kurang: X (butuh N, sisa M)". Anti jual minus.
+  2. **VOID transaksi sekarang benar** (`pos_provider.voidTransaction` → `DbHelper.restoreStockForTransaction`):
+     kembalikan stok bahan yang tadi dipotong + turunkan `used_count` voucher. Sesuai teks UI
+     yang udah bilang "stok dikembalikan".
+  3. **CAST AMAN**: semua `row['qty'] as int` / `r['price'] as int` diganti helper `toInt()`
+     (di `models.dart`) — anti crash `TypeError` di checkout & cetak ulang struk.
+  4. **TAMPILAN STOK ASLI**: tile menu "sisa 298" hardcode diganti `DbHelper.estimateMenuPortions`
+     (min porsi dari stok bahan). Tampil "sisa N" / "⚠️ habis" / "stok ∞" (tak ada resep).
+  5. **KAS KONSISTEN MASUK/KELUAR** (`CashType` konstan di `db_helper`): app simpen & dashboard
+     Sheet rumus `SUMIFS(...,"MASUK"/"KELUAR")` sekarang cocok. recap_screen pake konstan +
+     sync kas ke tab `Kas` lewat `appendKas`.
+  6. **RESTOK_LOG ke Sheet**: `logRestokToSheet` (dulunya dead code) sekarang dipanggil di
+     admin `_showRestokDialog`. Tab Restok_Log di Sheet terisi tiap restok bahan.
+  7. **ABSEN ANTI-DOBEL**: `recordAttendance` jadi upsert; `_toggleShift` OFF → `removeAttendance`
+     (hapus baris). Tidak ada lagi 2 baris absen untuk orang+shift yang sama.
+  8. **PULL MENU + MODAL/URUTAN**: `pullMenuFromSheet` sekarang tarik `price, cost, active, urutan`.
+  9. **SYNC FAILURE INDIKATOR**: `performSync` track `_lastSyncFailed` → status "Sync gagal ·
+     ketuk coba lagi". Timer 15mnt cuma jalan kalau `_googleConnected` (hemat baterai).
+  10. **REDESIGN SPLASH** (`splash_setup_screen`): flow baru = (1) login pilih akun Google,
+      (2) load daftar Spreadsheet existing via **Drive API** (`listSpreadsheets`), (3) user pilih
+      file existing **ATAU** buat baru (`createSpreadsheetByName`). Fallback "ketik email manual"
+      yang menyesatkan dihapus. Tambah `googleapis/drive/v3.dart`.
+  11. **TABELT**: grid menu adaptif 2/3/4 kolom (HP/tablet kecil/tablet besar), rasio split-view
+      disesuaikan.
+  12. **DB v3→v4 migration**: rename kolom `menu_items.sortOrder` (camelCase) → `sort_order`
+      (snake_case, konsisten); dedup data varian lama dipindah ke migration (sekali jalan,
+      bukan tiap `initData`).
+  13. **SEED idempoten**: insert varian/resep pake `ConflictAlgorithm.ignore` — aman kalau seed
+      ke-import 2x.
+  `flutter analyze` = **0 error** (27 info kosmetik: deprecation API Flutter baru).
 - **2026-07-31 (Kelola Menu & Varian — DIBIKIN MIRIP WEB + FIX BUG):**
   1. **Bahan/resep sekarang INLINE di form Tambah/Edit Menu** (`admin_hub._showMenuDialog`), persis web:
      nama/kategori/harga/modal + section "Bahan/Stok dipakai" (multi-baris: dropdown bahan + qty − / +

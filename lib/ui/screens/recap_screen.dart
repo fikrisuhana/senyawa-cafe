@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/models.dart';
 import '../../providers/pos_provider.dart';
 import '../../services/db_helper.dart';
+import '../../services/google_sheet_service.dart';
 import 'receipt_screen.dart';
 
 class RecapScreen extends StatefulWidget {
@@ -337,7 +339,7 @@ class _RecapScreenState extends State<RecapScreen> {
   void _showInputKasModal(BuildContext context) {
     final amountCtrl = TextEditingController();
     final noteCtrl = TextEditingController();
-    String type = 'OUT'; // OUT (Pengeluaran) | IN (Kas Masuk)
+    String type = CashType.out; // KELUAR (Pengeluaran) | MASUK (Kas Masuk)
     String category = 'Operasional';
 
     showDialog(
@@ -354,16 +356,16 @@ class _RecapScreenState extends State<RecapScreen> {
                     Expanded(
                       child: ChoiceChip(
                         label: const Text('Pengeluaran (Out)'),
-                        selected: type == 'OUT',
-                        onSelected: (s) => setDlgState(() => type = 'OUT'),
+                        selected: type == CashType.out,
+                        onSelected: (s) => setDlgState(() => type = CashType.out),
                       ),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: ChoiceChip(
                         label: const Text('Kas Masuk (In)'),
-                        selected: type == 'IN',
-                        onSelected: (s) => setDlgState(() => type = 'IN'),
+                        selected: type == CashType.in_,
+                        onSelected: (s) => setDlgState(() => type = CashType.in_),
                       ),
                     ),
                   ],
@@ -400,12 +402,29 @@ class _RecapScreenState extends State<RecapScreen> {
                     category: category,
                     note: note.isEmpty ? 'Kas Laci' : note,
                     businessDate: bDateKey,
-                    byName: 'Kasir',
+                    byName: widget.pos.activeCashierDisplay,
                   );
+
+                  // Sync ke Google Sheet (tab Kas).
+                  final prefs = await SharedPreferences.getInstance();
+                  final sheetId = prefs.getString('spreadsheet_id') ?? '';
+                  if (sheetId.isNotEmpty) {
+                    try {
+                      await GoogleSheetService().appendKas(
+                        sheetId, bDateKey, type, amt,
+                        category: category,
+                        note: note.isEmpty ? 'Kas Laci' : note,
+                        by: widget.pos.activeCashierDisplay,
+                      );
+                    } catch (e) {
+                      debugPrint('Append kas ke Sheet gagal: $e');
+                    }
+                  }
+
                   if (mounted) {
                     Navigator.pop(ctx);
                     _loadSummary();
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✓ Kas/Pengeluaran berhasil dicatat!')));
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✓ Kas/Pengeluaran berhasil dicatat & disinkron!')));
                   }
                 }
               },
@@ -436,8 +455,8 @@ class _RecapScreenState extends State<RecapScreen> {
               child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2))),
             ),
             const SizedBox(height: 16),
-            Row(
-              children: const [
+            const Row(
+              children: [
                 Icon(Icons.lock_clock, color: Color(0xFF7A5540)),
                 SizedBox(width: 8),
                 Text('Konfirmasi Tutup Kasir / Shift', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
