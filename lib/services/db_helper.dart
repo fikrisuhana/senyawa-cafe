@@ -537,6 +537,20 @@ class DbHelper {
     await db.update('vouchers', v.toMap(), where: 'id = ?', whereArgs: [v.id]);
   }
 
+  /// Upsert voucher by name (dipakai pull dari Sheet).
+  /// Kalau nama sudah ada → update semua field. Kalau baru → insert.
+  /// Catatan: used_count dari Sheet menang (owner bisa reset kalau mau).
+  Future<void> upsertVoucher(VoucherModel v) async {
+    final db = await database;
+    final existing = await db.query('vouchers', where: 'name = ?', whereArgs: [v.name]);
+    if (existing.isNotEmpty) {
+      final id = existing.first['id'];
+      await db.update('vouchers', v.toMap(), where: 'id = ?', whereArgs: [id]);
+    } else {
+      await db.insert('vouchers', v.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+  }
+
   Future<void> deleteVoucher(int id) async {
     final db = await database;
     await db.delete('vouchers', where: 'id = ?', whereArgs: [id]);

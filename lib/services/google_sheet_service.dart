@@ -4,6 +4,7 @@ import 'package:extension_google_sign_in_as_googleapis_auth/extension_google_sig
 import 'package:googleapis/sheets/v4.dart' as gs;
 import 'package:googleapis/drive/v3.dart' as gd;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../models/models.dart';
 import 'db_helper.dart';
 
 /// Model ringkas file Spreadsheet untuk dipilih di layar setup.
@@ -51,6 +52,7 @@ class GoogleSheetService {
     'Absensi': ['hari_usaha', 'karyawan', 'hadir', 'waktu'],
     'Karyawan': ['nama', 'aktif', 'shift_status'],
     'Setup': ['key', 'value'],
+    'Voucher_Log': ['kode_trx', 'hari_usaha', 'kasir', 'voucher', 'tipe', 'nilai_diskon', 'subtotal', 'total_setelah'],
     'Menu_Terlaris': ['menu', 'total_qty', 'total_omzet', 'qty_bulan_ini', 'omzet_bulan_ini'],
   };
 
@@ -401,7 +403,16 @@ class GoogleSheetService {
 
     title('📊 RUANG SENYAWA — DASHBOARD POS');
     sub('Filter interaktif: Pilih periode pada dropdown B3 di bawah (laporan otomatis hitung live):');
-    
+
+    // Baca daftar metode dari Setup (dinamis, dipakai di banyak seksi + chart).
+    final methodsRaw = await _pullSetupValue(id, 'payment_methods');
+    final methods = (methodsRaw ?? 'Tunai,QRIS,Transfer')
+        .split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    final tunaiMethod = methods.where((m) {
+      final low = m.toLowerCase();
+      return low.contains('tunai') || low.contains('cash');
+    }).followedBy(methods).first;
+
     // Baris 3: Dropdown Selector
     values.add(['🔍 PILIH PERIODE LAPORAN:', 'Hari Ini', r'="[ Rentang: "&$C$4&" s/d "&$B$5&" ]"']); r++;
 
@@ -427,15 +438,15 @@ class GoogleSheetService {
     gap();
 
     sec('▌ METODE PEMBAYARAN (PERIODE TERPILIH)');
-    kv('Tunai (CASH)', metode('CASH'), cFormula: 'IFERROR(${metode('CASH')}/$omzetFilter,0)', cfmt: 'pct');
-    kv('QRIS', metode('QRIS'), cFormula: 'IFERROR(${metode('QRIS')}/$omzetFilter,0)', cfmt: 'pct');
-    kv('Transfer Bank', metode('TRANSFER'), cFormula: 'IFERROR(${metode('TRANSFER')}/$omzetFilter,0)', cfmt: 'pct');
+    for (final m in methods) {
+      kv(m, metode(m), cFormula: 'IFERROR(${metode(m)}/$omzetFilter,0)', cfmt: 'pct');
+    }
     gap();
 
     sec('▌ KAS & UANG LACI (PERIODE TERPILIH)');
     kv('Kas Masuk', 'SUMIFS(Kas!C:C,Kas!A:A,">="&$tAwal,Kas!A:A,"<="&$tAkhir,Kas!B:B,"MASUK")', note: 'kas awal + pemasukan');
     kv('Pengeluaran Kas', 'SUMIFS(Kas!C:C,Kas!A:A,">="&$tAwal,Kas!A:A,"<="&$tAkhir,Kas!B:B,"KELUAR")');
-    kv('Estimasi Arus Kas Bersih', '${metode('CASH')}+SUMIFS(Kas!C:C,Kas!A:A,">="&$tAwal,Kas!A:A,"<="&$tAkhir,Kas!B:B,"MASUK")-SUMIFS(Kas!C:C,Kas!A:A,">="&$tAwal,Kas!A:A,"<="&$tAkhir,Kas!B:B,"KELUAR")', note: 'tunai + masuk − keluar');
+    kv('Estimasi Arus Kas Bersih', '${metode(tunaiMethod)}+SUMIFS(Kas!C:C,Kas!A:A,">="&$tAwal,Kas!A:A,"<="&$tAkhir,Kas!B:B,"MASUK")-SUMIFS(Kas!C:C,Kas!A:A,">="&$tAwal,Kas!A:A,"<="&$tAkhir,Kas!B:B,"KELUAR")', note: 'tunai + masuk − keluar');
     gap();
 
     sec('▌ TIPE PESANAN (PERIODE TERPILIH)');
@@ -531,7 +542,7 @@ class GoogleSheetService {
 
     // Tambah chart native (bar/pie) — idempotent: hapus chart lama dulu.
     try {
-      await addDashboardCharts(id);
+      await addDashboardCharts(id, methods: methods);
     } catch (e) {
       debugPrint('Chart dashboard gagal: $e');
     }
@@ -541,7 +552,7 @@ class GoogleSheetService {
   /// Tambah 3 chart native di tab Dashboard: (1) bar omzet 7 hari,
   /// (2) pie metode pembayaran hari ini, (3) bar jam sibuk.
   /// Idempotent: hapus semua embedded object (chart) lama dulu supaya tak numpuk.
-  Future<void> addDashboardCharts(String id) async {
+  Future<void> addDashboardCharts(String id, {List<String> methods = const ['Tunai', 'QRIS', 'Transfer']}) async {
     if (_api == null) return;
     final sid = await _sheetId(id, 'Dashboard');
     if (sid == null) return;
@@ -592,21 +603,23 @@ class GoogleSheetService {
       ),
     ))));
 
-    // --- CHART 2: Pie metode pembayaran hari ini ---
-    // Sumber: tabel kecil H1:I4 (label metode + omzet) — ditulis dulu.
+    // --- CHART 2: Pie metode pembayaran (dinamis dari Setup, pakai filter periode) ---
+    // Sumber: tabel kecil H1:I(n) (label metode + omzet) — ditulis dulu.
+    final pieRows = <List<Object?>>[['Metode', 'Omzet']];
+    for (final m in methods) {
+      pieRows.add([m, '=SUMIFS(Transaksi!J:J,Transaksi!B:B,">="&\$C\$4,Transaksi!B:B,"<="&\$B\$5,Transaksi!F:F,"$m",Transaksi!K:K,"ACTIVE")']);
+    }
+    final pieN = pieRows.length; // header + n metode
     try {
+      await _api!.spreadsheets.values.clear(gs.ClearValuesRequest(), id, "'Dashboard'!H1:I50");
       await _api!.spreadsheets.values.update(
-        gs.ValueRange(values: [
-          ['Metode', 'Omzet'],
-          ['Tunai', '=SUMIFS(Transaksi!J:J,Transaksi!B:B,TEXT(TODAY(),"yyyy-mm-dd"),Transaksi!F:F,"CASH",Transaksi!K:K,"ACTIVE")'],
-          ['QRIS', '=SUMIFS(Transaksi!J:J,Transaksi!B:B,TEXT(TODAY(),"yyyy-mm-dd"),Transaksi!F:F,"QRIS",Transaksi!K:K,"ACTIVE")'],
-          ['Transfer', '=SUMIFS(Transaksi!J:J,Transaksi!B:B,TEXT(TODAY(),"yyyy-mm-dd"),Transaksi!F:F,"TRANSFER",Transaksi!K:K,"ACTIVE")'],
-        ]),
+        gs.ValueRange(values: pieRows),
         id, "'Dashboard'!H1", valueInputOption: 'USER_ENTERED',
       );
     } catch (e) {
       debugPrint('Tabel metode gagal: $e');
     }
+    final pieEnd = pieN; // baris terakhir (1-based)
     reqs.add(gs.Request(addChart: gs.AddChartRequest(chart: gs.EmbeddedChart(
       position: gs.EmbeddedObjectPosition(
         overlayPosition: gs.OverlayPosition(
@@ -616,10 +629,10 @@ class GoogleSheetService {
         ),
       ),
       spec: gs.ChartSpec(
-        title: 'Metode Pembayaran — Hari Ini',
+        title: 'Metode Pembayaran (Periode Terpilih)',
         pieChart: gs.PieChartSpec(
-          domain: dataOf('Dashboard!H1:H4'),
-          series: dataOf('Dashboard!I1:I4'),
+          domain: dataOf("Dashboard!H1:H$pieEnd"),
+          series: dataOf("Dashboard!I1:I$pieEnd"),
           legendPosition: 'BOTTOM_LEGEND',
         ),
       ),
@@ -866,7 +879,13 @@ class GoogleSheetService {
   /// Owner bisa lihat semua bulan lampau (data tak pernah dihapus).
   Future<void> pushRekapBulanan(String id) async {
     if (_api == null) return;
-    final header = _tabs['Rekap_Bulanan']!;
+    // Baca metode pembayaran dinamis dari Setup.
+    final methodsRaw = await _pullSetupValue(id, 'payment_methods');
+    final methods = (methodsRaw ?? 'Tunai,QRIS,Transfer')
+        .split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+
+    // Header dinamis: bulan, omzet, transaksi, rata_rata, <metode1>, <metode2>, ..., diskon, modal, laba, kas_masuk, kas_keluar.
+    final header = <Object?>['bulan', 'omzet', 'transaksi', 'rata_rata', ...methods, 'diskon', 'modal', 'laba', 'kas_masuk', 'kas_keluar'];
 
     // Ambil semua hari_usaha unik dari tab Transaksi kolom B.
     final Set<String> bulanSet = {};
@@ -885,29 +904,30 @@ class GoogleSheetService {
     final values = <List<Object?>>[header];
     for (final b in bulans) {
       final bm = '$b-*'; // wildcard bulan, mis. "2026-08-*"
-      // Kolom mengacu: Transaksi B=hari_usaha, F=metode, G=subtotal, H=diskon,
-      // I=voucher, J=total, K=status. Transaksi_Item: B=menu, D=qty, F=subtotal.
-      // modal di-estimasi via SUMIFS cost total tidak ada di tab; pakai subtotal? →
-      // sekarang cost_total belum dikirim ke Sheet, jadi modal dikosongkan (0) sampai ditambahkan.
-      values.add([
+      final row = <Object?>[
         b, // bulan (YYYY-MM)
         '=SUMIFS(Transaksi!J:J,Transaksi!B:B,"$bm",Transaksi!K:K,"ACTIVE")', // omzet
         '=COUNTIFS(Transaksi!B:B,"$bm",Transaksi!K:K,"ACTIVE")', // transaksi
         '=IFERROR(SUMIFS(Transaksi!J:J,Transaksi!B:B,"$bm",Transaksi!K:K,"ACTIVE")/COUNTIFS(Transaksi!B:B,"$bm",Transaksi!K:K,"ACTIVE"),0)', // rata_rata
-        '=SUMIFS(Transaksi!J:J,Transaksi!B:B,"$bm",Transaksi!F:F,"CASH",Transaksi!K:K,"ACTIVE")', // tunai
-        '=SUMIFS(Transaksi!J:J,Transaksi!B:B,"$bm",Transaksi!F:F,"QRIS",Transaksi!K:K,"ACTIVE")', // qris
-        '=SUMIFS(Transaksi!J:J,Transaksi!B:B,"$bm",Transaksi!F:F,"TRANSFER",Transaksi!K:K,"ACTIVE")', // transfer
+      ];
+      // Kolom per metode (dinamis).
+      for (final m in methods) {
+        row.add('=SUMIFS(Transaksi!J:J,Transaksi!B:B,"$bm",Transaksi!F:F,"$m",Transaksi!K:K,"ACTIVE")');
+      }
+      row.addAll([
         '=SUMIFS(Transaksi!H:H,Transaksi!B:B,"$bm",Transaksi!K:K,"ACTIVE")', // diskon
-        '=SUMIFS(Transaksi!L:L,Transaksi!B:B,"$bm",Transaksi!K:K,"ACTIVE")', // modal (kolom L cost_total)
-        '=SUMIFS(Transaksi!M:M,Transaksi!B:B,"$bm",Transaksi!K:K,"ACTIVE")', // laba_kotor (kolom M = total-modal)
+        '=SUMIFS(Transaksi!L:L,Transaksi!B:B,"$bm",Transaksi!K:K,"ACTIVE")', // modal (kolom L)
+        '=SUMIFS(Transaksi!M:M,Transaksi!B:B,"$bm",Transaksi!K:K,"ACTIVE")', // laba (kolom M)
         '=SUMIFS(Kas!C:C,Kas!A:A,"$bm*",Kas!B:B,"MASUK")', // kas_masuk
         '=SUMIFS(Kas!C:C,Kas!A:A,"$bm*",Kas!B:B,"KELUAR")', // kas_keluar
       ]);
+      values.add(row);
     }
 
+    final lastCol = _colLetter(header.length - 1);
     // Tulis ulang tabel (clear dulu lalu update).
     try {
-      await _api!.spreadsheets.values.clear(gs.ClearValuesRequest(), id, "'Rekap_Bulanan'!A1:L200");
+      await _api!.spreadsheets.values.clear(gs.ClearValuesRequest(), id, "'Rekap_Bulanan'!A1:${lastCol}200");
     } catch (_) {}
     await _api!.spreadsheets.values.update(
       gs.ValueRange(values: values),
@@ -919,7 +939,7 @@ class GoogleSheetService {
     // Format: freeze header + currency kolom B,D,E,F,G,H,I,J,K,L.
     try {
       final sid = await _sheetId(id, 'Rekap_Bulanan');
-      if (sid != null) await _formatRekapBulanan(id, sid);
+      if (sid != null) await _formatRekapBulanan(id, sid, header.length);
     } catch (e) {
       debugPrint('Format Rekap_Bulanan gagal: $e');
     }
@@ -927,20 +947,19 @@ class GoogleSheetService {
   }
 
   /// Format tab Rekap_Bulanan: freeze header, lebar kolom, currency.
-  Future<void> _formatRekapBulanan(String id, int sid) async {
+  Future<void> _formatRekapBulanan(String id, int sid, int nCols) async {
     final reqs = <gs.Request>[];
-    final range = gs.GridRange(sheetId: sid, startRowIndex: 1, endRowIndex: 2, startColumnIndex: 0, endColumnIndex: 12);
     // Header bold + background coklat.
     reqs.add(gs.Request(repeatCell: gs.RepeatCellRequest(
-      range: gs.GridRange(sheetId: sid, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 12),
+      range: gs.GridRange(sheetId: sid, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: nCols),
       cell: gs.CellData(userEnteredFormat: gs.CellFormat(
           backgroundColor: _rgb(0x7A5540),
           textFormat: gs.TextFormat(bold: true, foregroundColor: _rgb(0xFFFFFF)))),
       fields: 'userEnteredFormat(backgroundColor,textFormat)',
     )));
-    // Currency untuk kolom omzet..kas_keluar (B,D,E,F,G,H,I,J,K,L = index 1,3,4,5,6,7,8,9,10,11). C(count)=2 skip.
-    final rpCols = [1, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-    for (final c in rpCols) {
+    // Currency semua kolom B onward KECUALI "transaksi" (index 2 = count).
+    for (int c = 1; c < nCols; c++) {
+      if (c == 2) continue; // skip kolom transaksi (count)
       reqs.add(gs.Request(repeatCell: gs.RepeatCellRequest(
         range: gs.GridRange(sheetId: sid, startRowIndex: 1, startColumnIndex: c, endColumnIndex: c + 1),
         cell: gs.CellData(userEnteredFormat: gs.CellFormat(
@@ -953,9 +972,6 @@ class GoogleSheetService {
       properties: gs.SheetProperties(sheetId: sid, gridProperties: gs.GridProperties(frozenRowCount: 1)),
       fields: 'gridProperties.frozenRowCount',
     )));
-    // Suppress unused warning for `range` (placeholder untuk extend format kalau perlu).
-    // ignore: unused_local_variable
-    final _ = range;
     await _api!.spreadsheets.batchUpdate(gs.BatchUpdateSpreadsheetRequest(requests: reqs), id);
   }
 
@@ -1133,6 +1149,25 @@ class GoogleSheetService {
       ]),
       id,
       "'Transaksi'!A1",
+      valueInputOption: 'RAW',
+    );
+  }
+
+  /// Append baris log voucher ke tab Voucher_Log saat transaksi pakai voucher.
+  /// Param: t = map transaksi (ambil code, business_date, cashier_name, voucher_name,
+  /// discount_amount, subtotal, total_amount). voucherType = 'PERCENT'/'FIXED'.
+  Future<void> appendVoucherUsage(String id, Map<String, dynamic> t, String voucherType) async {
+    if (_api == null) return;
+    final voucher = (t['voucher_name'] ?? '').toString();
+    if (voucher.isEmpty) return; // ga pakai voucher, skip
+    await _api!.spreadsheets.values.append(
+      gs.ValueRange(values: [
+        [
+          t['code'], t['business_date'], t['cashier_name'], voucher, voucherType,
+          t['discount_amount'] ?? 0, t['subtotal'] ?? 0, t['total_amount'] ?? 0,
+        ]
+      ]),
+      id, "'Voucher_Log'!A1",
       valueInputOption: 'RAW',
     );
   }
@@ -1378,6 +1413,43 @@ class GoogleSheetService {
     await _api!.spreadsheets.batchUpdate(gs.BatchUpdateSpreadsheetRequest(requests: reqs), id);
   }
 
+  /// Pull voucher dari tab Voucher (Sheet) → SQLite (upsert).
+  /// Owner atur: nama, tipe, nilai, aktif, kuota, terpakai, periode berlaku.
+  /// Return jumlah voucher diperbarui.
+  Future<int> pullVouchers(String id) async {
+    if (_api == null) return 0;
+    final res = await _api!.spreadsheets.values.get(id, "'Voucher'!A2:H");
+    final rows = res.values ?? [];
+    final db = DbHelper();
+    int n = 0;
+    for (final r in rows) {
+      if (r.isEmpty) continue;
+      final name = r[0].toString().trim();
+      if (name.isEmpty) continue;
+      final type = r.length > 1 ? r[1].toString().trim() : 'PERCENT';
+      final value = r.length > 2 ? (int.tryParse(r[2].toString()) ?? 0) : 0;
+      final active = r.length > 3 ? (r[3].toString() == '1' || r[3].toString().toLowerCase() == 'true') : true;
+      final kuotaStr = r.length > 4 ? r[4].toString().trim() : '';
+      final kuota = (kuotaStr.isEmpty || kuotaStr.toLowerCase() == 'inf') ? null : int.tryParse(kuotaStr);
+      final usedCount = r.length > 5 ? (int.tryParse(r[5].toString()) ?? 0) : 0;
+      final validFrom = r.length > 6 ? r[6].toString().trim() : '';
+      final validUntil = r.length > 7 ? r[7].toString().trim() : '';
+      await db.upsertVoucher(VoucherModel(
+        name: name,
+        type: type,
+        value: value,
+        active: active,
+        kuota: kuota,
+        usedCount: usedCount,
+        validFrom: validFrom.isEmpty ? null : validFrom,
+        validUntil: validUntil.isEmpty ? null : validUntil,
+      ));
+      n++;
+    }
+    debugPrint('⬇️ Pull voucher dari Sheet: $n voucher.');
+    return n;
+  }
+
   /// Pull daftar karyawan dari tab Karyawan (Sheet) → SQLite (upsert).
   /// Owner tambah/edit karyawan di Sheet → app ikut. Return jumlah diperbarui.
   Future<int> pullEmployees(String id) async {
@@ -1412,6 +1484,7 @@ class GoogleSheetService {
     String defaultShifts = 'Pagi,Siang,Sore,Malam',
     String defaultPaymentMethods = 'Tunai,QRIS,Transfer',
     String defaultPopupConfirm = 'true',
+    String defaultLiburKeywords = 'Libur,Cuti,Sakit,IZIN',
   }) async {
     if (_api == null) return;
     // Baca keys yg sudah ada.
@@ -1428,6 +1501,7 @@ class GoogleSheetService {
       'shifts': defaultShifts,
       'payment_methods': defaultPaymentMethods,
       'popup_konfirmasi_bayar': defaultPopupConfirm,
+      'libur_keywords': defaultLiburKeywords,
     };
     final toAdd = <List<Object?>>[];
     for (final e in defaults.entries) {

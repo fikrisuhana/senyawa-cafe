@@ -152,11 +152,17 @@ class PosProvider extends ChangeNotifier {
           // Kirim juga item-item transaksi (buat laporan menu terlaris di Sheet).
           final itemRows = await db.getTransactionItemRows(trx.id);
           await svc.appendTransactionItems(targetSheetId, trx.code, itemRows);
+          // Log voucher ke Voucher_Log kalau transaksi pakai voucher.
+          if ((trx.voucherName ?? '').isNotEmpty) {
+            final v = await db.getVoucherByName(trx.voucherName);
+            await svc.appendVoucherUsage(targetSheetId, trx.toMap(), v?.type ?? 'PERCENT');
+          }
           await db.markTransactionSynced(trx.id);
         }
         // Pull perubahan menu & karyawan dari Sheet (2 arah: owner bisa edit di Sheet).
         await svc.pullMenuFromSheet(targetSheetId);
         try {
+          await svc.pullVouchers(targetSheetId); // owner atur voucher di Sheet
           await svc.pullEmployees(targetSheetId);
           // Pull daftar shift dulu (dipakai normalisasi absen backward-compat).
           final newShifts = await svc.pullShifts(targetSheetId);
