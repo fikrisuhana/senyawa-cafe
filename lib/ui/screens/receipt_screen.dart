@@ -1,8 +1,9 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/models.dart';
+import '../../services/printer_service.dart';
 
 class ReceiptScreen extends StatelessWidget {
   final TransactionModel transaction;
@@ -421,74 +422,86 @@ class ReceiptScreen extends StatelessWidget {
     bool kitchen = false,
   }) async {
     final label = kitchen ? 'Struk Dapur' : 'Struk Pelanggan';
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('⚡ Mengirim $label ke "$printerName"...'),
-        backgroundColor: const Color(0xFF7A5540),
-        duration: const Duration(seconds: 2),
-      ),
-    );
+    final svc = PrinterService();
+
+    // Cek permission Bluetooth dulu.
+    final granted = await svc.isPermissionGranted();
+    if (!granted) {
+      if (!context.mounted) return;
+      _showPrintError(context, 'Permission Bluetooth belum diizinkan.',
+          'Buka Pengaturan HP → Aplikasi → Ruang Senyawa POS → izinkan Bluetooth/Terdekat perangkat.');
+      return;
+    }
+
+    // Baca MAC printer tersimpan di prefs (dipilih dari Admin).
+    final prefs = await SharedPreferences.getInstance();
+    final mac = prefs.getString('printer_mac') ?? '';
+    if (mac.isEmpty) {
+      if (!context.mounted) return;
+      _showPrintError(context, 'Printer belum dipilih.',
+          'Buka Admin Hub → Setelan App → Atur Printer → pilih printer dari daftar perangkat tersanding.');
+      return;
+    }
+
+    // Connect ke printer.
+    final connected = await svc.isConnected || await svc.connect(mac);
+    if (!connected) {
+      if (!context.mounted) return;
+      _showPrintError(context, 'Gagal terhubung ke printer "$printerName" ($mac).',
+          '1. Pastikan Bluetooth HP nyala.\n2. Pastikan printer nyala & ter-pair di HP.\n3. Coba pilih ulang printer di Admin Hub.');
+      return;
+    }
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('⚡ Mengirim $label ke "$printerName"...'),
+            backgroundColor: const Color(0xFF7A5540), duration: const Duration(seconds: 2)),
+      );
+    }
 
     final bytes = _buildEscPosBytes(printerName, paperSize, headerText, footerText, currencyFormatter, dateFormatter, kitchen: kitchen);
+    final ok = await svc.printBytes(bytes);
 
-    try {
-      const platform = MethodChannel('id.ruangsenyawa.pos/printer');
-      await platform.invokeMethod('printBytes', {
-        'printerName': printerName,
-        'bytes': bytes,
-      });
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✅ $label terkirim ke "$printerName" 🎉'),
-            backgroundColor: const Color(0xFF356A58),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-        // Sengaja TIDAK keluar — biar bisa cetak lagi (pelanggan / dapur).
-      }
-    } catch (e) {
-      if (context.mounted) {
-        final errStr = e.toString().replaceAll('PlatformException(', '').replaceAll(')', '');
-        showDialog(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            title: const Text('⚠️ Status Cetak Bluetooth'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  errStr,
-                  style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 13),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Solusi Cepat:',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                ),
-                const SizedBox(height: 4),
-                const Text(
-                  '1. Pastikan Bluetooth HP dinyalakan.\n'
-                  '2. Sandingkan (Pair) printer di Pengaturan Bluetooth HP (PIN: 0000 atau 1234).\n'
-                  '3. Pastikan nama printer yang dipilih di Admin Hub sama persis dengan di Bluetooth HP.',
-                  style: TextStyle(fontSize: 11, height: 1.3),
-                ),
-              ],
-            ),
-            actions: [
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF7A5540), foregroundColor: Colors.white),
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Mengerti'),
-              ),
-            ],
-          ),
-        );
-      }
+    if (!context.mounted) return;
+    if (ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('✅ $label terkirim ke "$printerName" 🎉'),
+            backgroundColor: const Color(0xFF356A58), duration: const Duration(seconds: 2)),
+      );
+      // Sengaja TIDAK keluar — biar bisa cetak lagi (pelanggan / dapur).
+    } else {
+      _showPrintError(context, 'Gagal mengirim bytes ke printer.',
+          'Printer terhubung tapi gagal cetak. Coba ulangi, atau matikan-nyalakan printer.');
     }
+  }
+
+  /// Dialog error cetak (helper, dipakai _triggerDirectPrint).
+  void _showPrintError(BuildContext context, String title, String solusi) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('⚠️ Status Cetak Bluetooth'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 13)),
+            const SizedBox(height: 12),
+            const Text('Solusi:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+            const SizedBox(height: 4),
+            Text(solusi, style: const TextStyle(fontSize: 11, height: 1.3)),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF7A5540), foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Mengerti'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showEscPosDialog(BuildContext context, String headerText, String footerText, NumberFormat currencyFormatter, DateFormat dateFormatter) {

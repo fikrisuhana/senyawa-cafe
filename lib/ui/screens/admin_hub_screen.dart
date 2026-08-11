@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/models.dart';
 import '../../providers/pos_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../services/db_helper.dart';
 import '../../services/google_sheet_service.dart';
+import '../../services/printer_service.dart';
 import 'package:intl/intl.dart';
 import 'splash_setup_screen.dart';
 import 'receipt_screen.dart';
@@ -1125,6 +1126,7 @@ class _AdminHubScreenState extends State<AdminHubScreen> with SingleTickerProvid
 
   void _showPrinterSettingsDialog() async {
     final nameCtrl = TextEditingController(text: _printerName);
+    final macCtrl = TextEditingController(); // MAC printer terpilih
     String size = _paperSize;
     bool autoP = _autoPrint;
     final List<String> popularPrinters = [
@@ -1137,52 +1139,72 @@ class _AdminHubScreenState extends State<AdminHubScreen> with SingleTickerProvid
       'Thermal 58mm',
     ];
 
-    List<Map<String, String>> pairedDevicesFromPhone = [];
+    final prefs = await SharedPreferences.getInstance();
+    macCtrl.text = prefs.getString('printer_mac') ?? '';
 
-    try {
-      const platform = MethodChannel('id.ruangsenyawa.pos/printer');
-      final res = await platform.invokeMethod('getPairedDevices');
-      if (res is List) {
-        pairedDevicesFromPhone = res.map((e) => Map<String, String>.from(e as Map)).toList();
+    final svc = PrinterService();
+    List<BluetoothInfo> pairedDevices = [];
+    String loadMsg = '';
+
+    Future<void> loadPaired() async {
+      final granted = await svc.isPermissionGranted();
+      if (!granted) {
+        await svc.requestPermission();
       }
-    } catch (_) {}
+      try {
+        pairedDevices = await svc.pairedDevices();
+        loadMsg = '';
+      } catch (e) {
+        loadMsg = 'Gagal baca perangkat: $e';
+      }
+    }
+
+    await loadPaired();
 
     if (!mounted) return;
 
     showDialog(
       context: context,
-      builder: (_) => StatefulBuilder(
+      builder: (dlgCtx) => StatefulBuilder(
         builder: (ctx, setDlgState) => AlertDialog(
-          title: const Text('🖨️ Setelan Printer Bluetooth Native'),
+          title: const Text('🖨️ Setelan Printer Bluetooth'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Pilih / Ketik Nama Printer Bluetooth HP:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Nama Perangkat / MAC Address',
-                    hintText: 'Misal: POS-5802 atau RPP02N',
-                    filled: true,
-                    fillColor: Color(0xFFF1EFEB),
-                  ),
+                // Tombol refresh daftar perangkat
+                Row(
+                  children: [
+                    const Expanded(child: Text('📱 Perangkat Bluetooth tersanding:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF356A58)))),
+                    IconButton(
+                      icon: const Icon(Icons.refresh, size: 18),
+                      tooltip: 'Muat ulang daftar',
+                      onPressed: () async {
+                        await loadPaired();
+                        setDlgState(() {});
+                      },
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 8),
-
-                // Dynamic Live Paired Devices from Phone
-                if (pairedDevicesFromPhone.isNotEmpty) ...[
-                  const Text('📱 Perangkat Bluetooth Tersanding di HP Bro (Live Native):', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF356A58))),
-                  const SizedBox(height: 4),
+                if (loadMsg.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text(loadMsg, style: const TextStyle(fontSize: 11, color: Colors.red)),
+                  )
+                else if (pairedDevices.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 4),
+                    child: Text('Belum ada perangkat tersanding. Pair printer di Pengaturan Bluetooth HP dulu.', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                  )
+                else
                   Wrap(
                     spacing: 6,
                     runSpacing: 4,
-                    children: pairedDevicesFromPhone.map((dev) {
-                      final pName = dev['name'] ?? 'Unknown';
-                      final pAddr = dev['address'] ?? '';
-                      final bool isSelected = nameCtrl.text.trim().toUpperCase() == pName.toUpperCase() || nameCtrl.text.trim() == pAddr;
+                    children: pairedDevices.map((dev) {
+                      final pName = dev.name;
+                      final pAddr = dev.macAdress;
+                      final bool isSelected = macCtrl.text == pAddr;
                       return ChoiceChip(
                         avatar: const Icon(Icons.bluetooth_connected, size: 14, color: Color(0xFF356A58)),
                         label: Text('$pName ($pAddr)', style: const TextStyle(fontSize: 11)),
@@ -1192,16 +1214,31 @@ class _AdminHubScreenState extends State<AdminHubScreen> with SingleTickerProvid
                           if (sel) {
                             setDlgState(() {
                               nameCtrl.text = pName;
+                              macCtrl.text = pAddr;
                             });
                           }
                         },
                       );
                     }).toList(),
                   ),
-                  const SizedBox(height: 10),
-                ],
+                const SizedBox(height: 12),
 
-                const Text('Perangkat Bluetooth Populer Kasir:', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                const Text('Nama Printer (untuk tampil di app):', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(
+                    hintText: 'Misal: POS-5802 atau RPP02N',
+                    filled: true,
+                    fillColor: Color(0xFFF1EFEB),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                if (macCtrl.text.isNotEmpty)
+                  Text('MAC: ${macCtrl.text}', style: const TextStyle(fontSize: 10, color: Colors.grey)),
+
+                const SizedBox(height: 8),
+                const Text('Printer populer (manual):', style: TextStyle(fontSize: 11, color: Colors.grey)),
                 const SizedBox(height: 4),
                 Wrap(
                   spacing: 6,
@@ -1247,8 +1284,9 @@ class _AdminHubScreenState extends State<AdminHubScreen> with SingleTickerProvid
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF356A58), foregroundColor: Colors.white),
               onPressed: () async {
                 final pName = nameCtrl.text.trim();
-                final prefs = await SharedPreferences.getInstance();
+                final pMac = macCtrl.text.trim();
                 await prefs.setString('printer_name', pName.isEmpty ? 'Thermal 58mm' : pName);
+                await prefs.setString('printer_mac', pMac);
                 await prefs.setString('paper_size', size);
                 await prefs.setBool('auto_print', autoP);
 
@@ -1258,7 +1296,7 @@ class _AdminHubScreenState extends State<AdminHubScreen> with SingleTickerProvid
                   _autoPrint = autoP;
                 });
 
-                if (mounted) {
+                if (ctx.mounted) {
                   Navigator.pop(ctx);
                   _showTestPrintDialog();
                 }
@@ -1281,7 +1319,7 @@ class _AdminHubScreenState extends State<AdminHubScreen> with SingleTickerProvid
       businessDate: DateFormat('yyyy-MM-dd').format(now),
       cashierName: widget.pos.activeCashierDisplay,
       orderType: 'DINE_IN',
-      paymentMethod: 'CASH',
+      paymentMethod: 'Tunai',
       subtotal: 28000,
       discountAmount: 0,
       totalAmount: 28000,

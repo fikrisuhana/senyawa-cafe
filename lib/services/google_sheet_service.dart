@@ -1192,6 +1192,85 @@ class GoogleSheetService {
     );
   }
 
+  /// Sinkron batch transaksi (header + item + voucher log) dgn DEDUP via kode_trx.
+  /// Cek 1x: kode_trx mana yg sudah ada di Sheet → skip yg sudah ada (anti dobel
+  /// kalau sync gagal tengah jalan & retry). Return jumlah trx baru yg ditulis.
+  Future<int> appendTransactionBatch(String id, List<Map<String, dynamic>> trxs,
+      {Map<String, List<Map<String, dynamic>>> itemRowsByCode = const {},
+        Map<String, String> voucherTypeByCode = const {}}) async {
+    if (_api == null || trxs.isEmpty) return 0;
+
+    // 1. Baca semua kode_trx yg sudah ada di tab Transaksi (sekali GET).
+    final existingCodes = <String>{};
+    try {
+      final res = await _api!.spreadsheets.values.get(id, "'Transaksi'!A2:A");
+      for (final r in res.values ?? <List<Object?>>[]) {
+        if (r.isNotEmpty) existingCodes.add(r[0].toString());
+      }
+    } catch (e) {
+      debugPrint('Baca existing kode_trx gagal: $e');
+    }
+
+    // 2. Filter trx yg belum ada di Sheet.
+    final newTrxs = trxs.where((t) {
+      final code = (t['code'] ?? '').toString();
+      return code.isNotEmpty && !existingCodes.contains(code);
+    }).toList();
+    if (newTrxs.isEmpty) return 0;
+
+    // 3. Append header transaksi (batch 1x).
+    final trxRows = newTrxs.map((t) {
+      final int modal = (t['cost_total'] as num?)?.toInt() ?? 0;
+      final int total = (t['total_amount'] as num?)?.toInt() ?? 0;
+      final int laba = total - modal;
+      return [
+        t['code'], t['business_date'], t['created_at'], t['cashier_name'],
+        t['order_type'], t['payment_method'], t['subtotal'], t['discount_amount'],
+        t['voucher_name'] ?? '', t['total_amount'], t['status'] ?? 'ACTIVE',
+        modal, laba,
+      ];
+    }).toList();
+    await _api!.spreadsheets.values.append(
+      gs.ValueRange(values: trxRows), id, "'Transaksi'!A1", valueInputOption: 'RAW');
+
+    // 4. Append item transaksi utk trx baru.
+    final itemRows = <List<Object?>>[];
+    for (final t in newTrxs) {
+      final code = (t['code'] ?? '').toString();
+      final items = itemRowsByCode[code] ?? [];
+      for (final it in items) {
+        itemRows.add([
+          code, it['name'] ?? '', it['variants'] ?? '', it['qty'] ?? 0,
+          it['price'] ?? 0, it['subtotal'] ?? 0,
+        ]);
+      }
+    }
+    if (itemRows.isNotEmpty) {
+      await _api!.spreadsheets.values.append(
+        gs.ValueRange(values: itemRows), id, "'Transaksi_Item'!A1", valueInputOption: 'RAW');
+    }
+
+    // 5. Append voucher log utk trx baru yg pakai voucher.
+    final voucherRows = <List<Object?>>[];
+    for (final t in newTrxs) {
+      final voucher = (t['voucher_name'] ?? '').toString();
+      if (voucher.isEmpty) continue;
+      final code = (t['code'] ?? '').toString();
+      voucherRows.add([
+        code, t['business_date'], t['cashier_name'], voucher,
+        voucherTypeByCode[code] ?? 'PERCENT', t['discount_amount'] ?? 0,
+        t['subtotal'] ?? 0, t['total_amount'] ?? 0,
+      ]);
+    }
+    if (voucherRows.isNotEmpty) {
+      await _api!.spreadsheets.values.append(
+        gs.ValueRange(values: voucherRows), id, "'Voucher_Log'!A1", valueInputOption: 'RAW');
+    }
+
+    debugPrint('⬆️ Batch append: ${newTrxs.length} trx baru (dedup skip ${trxs.length - newTrxs.length}).');
+    return newTrxs.length;
+  }
+
   /// Catat penambahan stok ke tab terpisah Restok_Log (tanpa mengganggu data utama).
   Future<void> logRestokToSheet(String id, String packagingName, int addedQty, String unit, int finalStock) async {
     if (_api == null) return;

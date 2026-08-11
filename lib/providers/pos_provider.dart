@@ -147,17 +147,31 @@ class PosProvider extends ChangeNotifier {
         _googleConnected = true;
         final unsynced = await db.getUnsyncedTransactions();
         final hadNewTrx = unsynced.isNotEmpty;
-        for (final trx in unsynced) {
-          await svc.appendTransaction(targetSheetId, trx.toMap());
-          // Kirim juga item-item transaksi (buat laporan menu terlaris di Sheet).
-          final itemRows = await db.getTransactionItemRows(trx.id);
-          await svc.appendTransactionItems(targetSheetId, trx.code, itemRows);
-          // Log voucher ke Voucher_Log kalau transaksi pakai voucher.
-          if ((trx.voucherName ?? '').isNotEmpty) {
-            final v = await db.getVoucherByName(trx.voucherName);
-            await svc.appendVoucherUsage(targetSheetId, trx.toMap(), v?.type ?? 'PERCENT');
+        if (hadNewTrx) {
+          // Kumpulkan item & tipe voucher per kode_trx (utk batch append dedup).
+          final itemByCode = <String, List<Map<String, dynamic>>>{};
+          final voucherTypeByCode = <String, String>{};
+          for (final trx in unsynced) {
+            itemByCode[trx.code] = await db.getTransactionItemRows(trx.id);
+            if ((trx.voucherName ?? '').isNotEmpty) {
+              final v = await db.getVoucherByName(trx.voucherName);
+              voucherTypeByCode[trx.code] = v?.type ?? 'PERCENT';
+            }
           }
-          await db.markTransactionSynced(trx.id);
+          // Batch append dgn dedup via kode_trx (anti dobel kalau sync retry).
+          final written = await svc.appendTransactionBatch(
+            targetSheetId,
+            unsynced.map((t) => t.toMap()).toList(),
+            itemRowsByCode: itemByCode,
+            voucherTypeByCode: voucherTypeByCode,
+          );
+          // Tandai semua unsynced sbg synced (batch dedup tangani skip dobel;
+          // trx yg di-skip pun sudah ada di Sheet jadi aman).
+          if (written >= 0) {
+            for (final trx in unsynced) {
+              await db.markTransactionSynced(trx.id);
+            }
+          }
         }
         // Pull perubahan menu & karyawan dari Sheet (2 arah: owner bisa edit di Sheet).
         await svc.pullMenuFromSheet(targetSheetId);
