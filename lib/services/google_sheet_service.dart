@@ -1434,13 +1434,18 @@ class GoogleSheetService {
       final usedCount = r.length > 5 ? (int.tryParse(r[5].toString()) ?? 0) : 0;
       final validFrom = r.length > 6 ? r[6].toString().trim() : '';
       final validUntil = r.length > 7 ? r[7].toString().trim() : '';
+      // used_count: APP authoritative (increment tiap checkout). Kalau voucher sudah
+      // ada di app → pertahankan nilai app (jgn overwrite dgn Sheet, anti konflik
+      // kalau owner salah edit). Kalau voucher baru → pakai nilai Sheet.
+      final existing = await db.getVoucherByName(name);
+      final appUsedCount = existing?.usedCount ?? usedCount;
       await db.upsertVoucher(VoucherModel(
         name: name,
         type: type,
         value: value,
         active: active,
         kuota: kuota,
-        usedCount: usedCount,
+        usedCount: appUsedCount,
         validFrom: validFrom.isEmpty ? null : validFrom,
         validUntil: validUntil.isEmpty ? null : validUntil,
       ));
